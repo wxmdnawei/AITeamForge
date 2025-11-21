@@ -1,0 +1,5 @@
+{
+  "name": "Trae Matchmaker",
+  "description": "An AI-powered team matching application for the Trae offline coding challenge. Groups participants and generates creative team identities.",
+  "requestFramePermissions": []
+}
