@@ -1,22 +1,24 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { v4 as uuidv4 } from 'uuid';
 import { MatchingStatus, Participant, Team, ChatMessage, TaskItem, SavedMatch } from './types';
-import { enrichTeamsWithGemini, generateTeamAnnouncement, generateAIChatResponse, generateAIProactiveMessage } from './services/geminiService';
+import { enrichTeamsWithGemini, generateTeamAnnouncement, generateSingleTeamAnnouncement, generateAIChatResponse, generateAIProactiveMessage, generateUUID } from './services/geminiService';
+import { PEER_CONFIG } from './services/peerConfig'; // Import Config
 import ParticipantInput from './components/ParticipantInput';
 import TeamCard from './components/TeamCard';
 import Background from './components/Background';
 import JoinScreen from './components/JoinScreen';
 import ChatWidget from './components/ChatWidget';
 import HistoryModal from './components/HistoryModal';
-import { RefreshCw, ArrowLeft, Terminal, Save, Share2, AudioLines, Loader2, QrCode, X, Check, AlertCircle, Info, History, Square } from 'lucide-react';
+import { RefreshCw, ArrowLeft, Terminal, Save, Share2, AudioLines, Loader2, QrCode, X, Check, AlertCircle, Info, History, Square, Pause, Play } from 'lucide-react';
 import Peer, { type DataConnection } from 'peerjs';
 
 // Audio Decoding Utilities for Raw PCM
 function decode(base64: string) {
   try {
     if (!base64) return new Uint8Array(0);
-    const binaryString = atob(base64);
+    // Sanitize input: remove whitespace/newlines which cause atob to fail
+    const cleanBase64 = base64.replace(/\s/g, '');
+    const binaryString = atob(cleanBase64);
     const len = binaryString.length;
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) {
@@ -35,20 +37,25 @@ async function decodeAudioData(
   sampleRate: number,
   numChannels: number,
 ): Promise<AudioBuffer> {
-  if (data.length === 0) {
-    return ctx.createBuffer(numChannels, 1, sampleRate);
-  }
-  const dataInt16 = new Int16Array(data.buffer);
-  const frameCount = dataInt16.length / numChannels;
-  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+  try {
+      if (data.length === 0) {
+        return ctx.createBuffer(numChannels, 1, sampleRate);
+      }
+      const dataInt16 = new Int16Array(data.buffer);
+      const frameCount = dataInt16.length / numChannels;
+      const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
 
-  for (let channel = 0; channel < numChannels; channel++) {
-    const channelData = buffer.getChannelData(channel);
-    for (let i = 0; i < frameCount; i++) {
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
-    }
+      for (let channel = 0; channel < numChannels; channel++) {
+        const channelData = buffer.getChannelData(channel);
+        for (let i = 0; i < frameCount; i++) {
+          channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+        }
+      }
+      return buffer;
+  } catch (e) {
+      console.error("Decode Audio Data Failed", e);
+      return ctx.createBuffer(numChannels, 1, sampleRate);
   }
-  return buffer;
 }
 
 const base64EncodeUnicode = (str: string) => {
@@ -67,6 +74,25 @@ const base64DecodeUnicode = (str: string) => {
       })
       .join('')
   );
+};
+
+// Safe Storage Wrappers
+const safeLocalStorage = {
+  getItem: (key: string) => {
+    try { return localStorage.getItem(key); } catch (e) { return null; }
+  },
+  setItem: (key: string, value: string) => {
+    try { localStorage.setItem(key, value); } catch (e) { console.warn('LocalStorage failed', e); }
+  }
+};
+
+const safeSessionStorage = {
+  getItem: (key: string) => {
+    try { return sessionStorage.getItem(key); } catch (e) { return null; }
+  },
+  setItem: (key: string, value: string) => {
+    try { sessionStorage.setItem(key, value); } catch (e) { console.warn('SessionStorage failed', e); }
+  }
 };
 
 const App: React.FC = () => {
@@ -95,6 +121,12 @@ const App: React.FC = () => {
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
 
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
+  const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [playingTeamId, setPlayingTeamId] = useState<string | null>(null);
+  
+  // Playback Intent Ref to handle race conditions
+  const shouldPlayAudioRef = useRef<boolean>(false);
+
   const [isResultQrOpen, setIsResultQrOpen] = useState<boolean>(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   
@@ -108,13 +140,21 @@ const App: React.FC = () => {
   const [isAiChatEnabled, setIsAiChatEnabled] = useState(true); 
   const [isAiTyping, setIsAiTyping] = useState(false);
   
+  // Refs
+  const chatMessagesRef = useRef<ChatMessage[]>([]);
   const peerRef = useRef<Peer | null>(null);
   const participantConnectionsRef = useRef<Map<string, DataConnection>>(new Map());
   const connectionsRef = useRef<DataConnection[]>([]);
+  const peerInitTimeoutRef = useRef<any>(null);
 
   // Audio Refs
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+
+  // Sync chatMessages state to ref for event handlers
+  useEffect(() => {
+    chatMessagesRef.current = chatMessages;
+  }, [chatMessages]);
 
   const joinUrl = hostId 
     ? `${window.location.origin}${window.location.pathname}?view=join&host=${hostId}`
@@ -124,7 +164,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (viewMode === 'app') {
       // 1. Load History (Global LocalStorage)
-      const savedHistory = localStorage.getItem('trae_match_history');
+      const savedHistory = safeLocalStorage.getItem('trae_match_history');
       if (savedHistory) {
         try {
           setMatchHistory(JSON.parse(savedHistory));
@@ -135,7 +175,7 @@ const App: React.FC = () => {
 
       // 2. Load Active Session State (Isolated SessionStorage)
       try {
-        const sessionData = sessionStorage.getItem('trae_app_session');
+        const sessionData = safeSessionStorage.getItem('trae_app_session');
         if (sessionData) {
           const parsed = JSON.parse(sessionData);
           if (parsed.rawInput) setRawInput(parsed.rawInput);
@@ -163,7 +203,7 @@ const App: React.FC = () => {
         teams,
         taskLibrary
       };
-      sessionStorage.setItem('trae_app_session', JSON.stringify(sessionData));
+      safeSessionStorage.setItem('trae_app_session', JSON.stringify(sessionData));
     }
   }, [rawInput, eventName, eventTheme, teams, taskLibrary, viewMode]);
 
@@ -175,7 +215,7 @@ const App: React.FC = () => {
 
   const sendSystemMessage = useCallback((text: string, channelId: string = 'lobby') => {
     const sysMsg: ChatMessage = {
-      id: Date.now().toString() + Math.random().toString(),
+      id: generateUUID(),
       sender: 'System',
       text: text,
       isHost: false,
@@ -189,19 +229,41 @@ const App: React.FC = () => {
     });
   }, []);
 
-  useEffect(() => {
-    if (viewMode === 'app' && !peerRef.current) {
-      const peer = new Peer();
+  const initHostPeer = useCallback(() => {
+      if (peerRef.current) {
+        peerRef.current.destroy();
+        peerRef.current = null;
+      }
+
+      const peer = new Peer(PEER_CONFIG);
       peerRef.current = peer;
+
+      // Connection Timeout Watchdog
+      peerInitTimeoutRef.current = setTimeout(() => {
+        if (peer && !peer.id && !peer.destroyed) {
+            console.warn("Peer init timeout. Retrying...");
+            setPeerError("Initializing slow... Retrying...");
+            initHostPeer(); // Retry
+        }
+      }, 10000); // 10s timeout
 
       peer.on('open', (id) => {
         console.log('Host Peer ID:', id);
         setHostId(id);
         setPeerError('');
+        if (peerInitTimeoutRef.current) clearTimeout(peerInitTimeoutRef.current);
       });
 
       peer.on('connection', (conn) => {
         connectionsRef.current.push(conn);
+        
+        conn.on('open', () => {
+             // Send current history to new participant immediately upon connection
+             if (chatMessagesRef.current.length > 0) {
+                 conn.send({ type: 'chat_history', history: chatMessagesRef.current });
+             }
+        });
+
         conn.on('data', (data: any) => {
           handleIncomingPeerData(data, conn);
         });
@@ -222,30 +284,44 @@ const App: React.FC = () => {
       });
 
       peer.on('disconnected', () => {
-        console.warn('PeerServer disconnected. Attempting to reconnect...');
-        setTimeout(() => {
-          if (peer && !peer.destroyed) {
+        console.warn('PeerServer disconnected.');
+        // IMPORTANT: Only reconnect if actually disconnected and not destroyed
+        if (peer && !peer.destroyed && peer.disconnected) {
+            console.log('Attempting to reconnect...');
             peer.reconnect();
-          }
-        }, 2000);
+        }
       });
 
       peer.on('error', (err) => {
+        // Suppress "Lost connection to server" console error spam
+        if (err.type === 'network' || err.message === 'Lost connection to server') {
+             console.log('PeerJS network hiccup. Checking reconnection...');
+             if (peer && !peer.destroyed && peer.disconnected) {
+                 peer.reconnect();
+             }
+             return;
+        }
+        
         console.error('Peer error:', err);
+
         if (err.type !== 'disconnected' && err.type !== 'peer-unavailable') {
-           setPeerError(`Network Error: ${err.type || 'Unknown'}`);
+           setPeerError(`Network: ${err.type || 'Error'}`);
         }
       });
+  }, [sendSystemMessage]);
 
-      // Cleanup to ensure independence
-      return () => {
-        if (peerRef.current) {
-          peerRef.current.destroy();
-          peerRef.current = null;
-        }
-      };
+  useEffect(() => {
+    if (viewMode === 'app') {
+        initHostPeer();
     }
-  }, [viewMode, sendSystemMessage]);
+    return () => {
+        if (peerInitTimeoutRef.current) clearTimeout(peerInitTimeoutRef.current);
+        if (peerRef.current) {
+            peerRef.current.destroy();
+            peerRef.current = null;
+        }
+    };
+  }, [viewMode, initHostPeer]);
 
   const handleIncomingPeerData = (data: any, sourceConn: DataConnection) => {
     if (data && (data.name || data.type === 'join')) {
@@ -266,7 +342,7 @@ const App: React.FC = () => {
     if (data && data.type === 'chat') {
       const channelId = data.channelId || 'lobby';
       const newMsg: ChatMessage = {
-        id: data.id || Date.now().toString(),
+        id: data.id || generateUUID(),
         sender: data.sender || 'Anonymous',
         text: data.text,
         isHost: false,
@@ -284,7 +360,7 @@ const App: React.FC = () => {
 
   const sendAiMessage = useCallback((text: string, channelId: string = 'lobby') => {
     const aiMsg: ChatMessage = {
-      id: Date.now().toString() + Math.random().toString(),
+      id: generateUUID(),
       sender: 'AI Host',
       text: text,
       isHost: false,
@@ -347,7 +423,7 @@ const App: React.FC = () => {
 
   const handleSendHostChat = (text: string, channelId: string = 'lobby') => {
     const msg: ChatMessage = {
-      id: Date.now().toString(),
+      id: generateUUID(),
       sender: 'Host',
       text: text,
       isHost: true,
@@ -361,14 +437,14 @@ const App: React.FC = () => {
   };
 
   const saveHistoryToStorage = (history: SavedMatch[]) => {
-    localStorage.setItem('trae_match_history', JSON.stringify(history));
+    safeLocalStorage.setItem('trae_match_history', JSON.stringify(history));
   };
 
   const handleSaveToHistory = () => {
     if (teams.length === 0) return;
     try {
       const newRecord: SavedMatch = {
-        id: uuidv4(),
+        id: generateUUID(),
         timestamp: Date.now(),
         eventName,
         eventTheme,
@@ -418,6 +494,26 @@ const App: React.FC = () => {
     }
   };
 
+  // History Import/Export
+  const handleImportHistory = (importedMatches: SavedMatch[]) => {
+    // Filter out duplicates based on ID
+    const existingIds = new Set(matchHistory.map(m => m.id));
+    const newMatches = importedMatches.filter(m => !existingIds.has(m.id));
+    
+    if (newMatches.length === 0) {
+        showToast('No new records found. / 未发现新记录。', 'info');
+        return;
+    }
+
+    const updatedHistory = [...newMatches, ...matchHistory];
+    // Sort by timestamp desc
+    updatedHistory.sort((a, b) => b.timestamp - a.timestamp);
+    
+    setMatchHistory(updatedHistory);
+    saveHistoryToStorage(updatedHistory);
+    showToast(`Imported ${newMatches.length} records. / 成功导入 ${newMatches.length} 条记录。`, 'success');
+  };
+
   useEffect(() => {
     if (viewMode !== 'app') return;
     const params = new URLSearchParams(window.location.search);
@@ -460,12 +556,12 @@ const App: React.FC = () => {
     if (participants.length < 2) return;
 
     setStatus('shuffling');
-    setIsPlayingAudio(false); 
+    handleStopBroadcast();
 
     await new Promise(resolve => setTimeout(resolve, 800));
 
     const participantObjects: Participant[] = participants.map(name => ({
-      id: uuidv4(),
+      id: generateUUID(),
       name: name
     }));
 
@@ -479,7 +575,6 @@ const App: React.FC = () => {
     });
 
     const basicTeams: Team[] = tempBuckets.map((members, index) => {
-      // AUTOMATIC TASK DISTRIBUTION FROM LIBRARY
       let initialTopic = undefined;
       let initialTopicZh = undefined;
       if (taskLibrary.length > 0) {
@@ -489,7 +584,7 @@ const App: React.FC = () => {
       }
 
       return {
-        id: uuidv4(),
+        id: generateUUID(),
         name: 'Processing...',
         members: members,
         motto: 'Loading metadata...',
@@ -554,7 +649,6 @@ const App: React.FC = () => {
   }, [participants, teamSize, eventName, eventTheme, sendAiMessage, taskLibrary]);
 
   const handleUpdateTeam = (id: string, updates: Partial<Team>) => {
-    // Check for Task Updates to Broadcast
     const team = teams.find(t => t.id === id);
     if (team) {
       const topicChanged = updates.topic !== undefined && updates.topic !== team.topic;
@@ -573,6 +667,31 @@ const App: React.FC = () => {
     setTeams(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
   };
 
+  const handleRegenerateTeam = async (teamId: string) => {
+      const team = teams.find(t => t.id === teamId);
+      if (!team) return;
+
+      try {
+          // Call service for single team, preserving existing topic/members but asking for new identity
+          const enriched = await enrichTeamsWithGemini([team], eventName, eventTheme);
+          
+          if (enriched && enriched.length > 0) {
+              const updatedTeam = enriched[0];
+              handleUpdateTeam(teamId, updatedTeam);
+              showToast("Team identity regenerated! / 团队信息已更新！", "success");
+              
+              // Announce update
+              const updateMsg = `🔄 IDENTITY REFRESH for Team ${team.name}!\n\n` +
+                                `Reborn as: ${updatedTeam.mascotEmoji} ${updatedTeam.name}\n` + 
+                                `Motto: "${updatedTeam.motto}"`;
+              sendAiMessage(updateMsg, 'lobby');
+          }
+      } catch(e) {
+          console.error("Regeneration failed", e);
+          showToast("Regeneration failed / 更新失败", "error");
+      }
+  };
+
   const handleShare = async () => {
     if (teams.length === 0) return;
     try {
@@ -585,45 +704,78 @@ const App: React.FC = () => {
   };
 
   const handleStopBroadcast = () => {
+    // This is now a "Hard Reset" function
+    shouldPlayAudioRef.current = false;
+
     if (audioSourceRef.current) {
-      try {
-        audioSourceRef.current.stop();
-      } catch (e) {
-        // Ignore if already stopped
-      }
+      try { audioSourceRef.current.stop(); } catch (e) {}
       audioSourceRef.current = null;
     }
+    
     if (audioContextRef.current) {
       if (audioContextRef.current.state !== 'closed') {
-          audioContextRef.current.close();
+          try { audioContextRef.current.close(); } catch (e) {}
       }
       audioContextRef.current = null;
     }
+
     setIsPlayingAudio(false);
+    setIsPaused(false);
+    setPlayingTeamId(null);
   };
 
-  const handleBroadcast = async () => {
-    if (teams.length === 0) return;
-    
-    // Stop previous if any (toggle behavior)
-    if (isPlayingAudio) {
-       handleStopBroadcast();
-       return;
+  const toggleAudioPlayback = async (action: 'global' | 'team', teamId?: string) => {
+    // Case 1: Resume if paused and matches current context
+    if (audioContextRef.current && isPaused) {
+        // Ensure we are resuming the correct context (global vs specific team)
+        const isSameContext = (action === 'global' && !playingTeamId) || (action === 'team' && playingTeamId === teamId);
+        
+        if (isSameContext) {
+            await audioContextRef.current.resume();
+            setIsPlayingAudio(true);
+            setIsPaused(false);
+            shouldPlayAudioRef.current = true;
+            return;
+        }
     }
 
-    setIsPlayingAudio(true);
-    try {
-      const base64Audio = await generateTeamAnnouncement(teams, eventName);
-      if (!base64Audio) {
-          showToast("Failed to generate audio / 生成音频失败", 'error');
-          setIsPlayingAudio(false);
-          return;
-      }
-      // Check for AudioContext support and handle potential errors
+    // Case 2: Pause if playing
+    if (isPlayingAudio) {
+         const isSameContext = (action === 'global' && !playingTeamId) || (action === 'team' && playingTeamId === teamId);
+         if (isSameContext) {
+             if (audioContextRef.current && audioContextRef.current.state === 'running') {
+                 await audioContextRef.current.suspend();
+                 setIsPlayingAudio(false);
+                 setIsPaused(true);
+                 // Keep shouldPlayAudioRef true-ish or create a new paused state, 
+                 // but 'shouldPlayAudioRef' is mainly for aborting async gen.
+                 // The context holds the paused state.
+                 return;
+             }
+         }
+    }
+
+    // Case 3: Start New (or restart if switched context)
+    handleStopBroadcast(); // Reset everything first
+    shouldPlayAudioRef.current = true;
+    setIsPlayingAudio(true); // Optimistic UI update
+    setIsPaused(false);
+
+    if (action === 'team' && teamId) {
+        setPlayingTeamId(teamId);
+        handleBroadcastTeam(teamId);
+    } else {
+        handleBroadcast();
+    }
+  };
+
+  const playAudioFromBase64 = async (base64Audio: string) => {
+      if (!shouldPlayAudioRef.current) return;
+
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioContextClass) {
         showToast("AudioContext not supported / 不支持音频播放", 'error');
-        setIsPlayingAudio(false);
+        handleStopBroadcast();
         return;
       }
 
@@ -631,31 +783,82 @@ const App: React.FC = () => {
       try {
          audioCtx = new AudioContextClass({sampleRate: 24000});
       } catch (err) {
-         // Fallback for browsers that don't support sampleRate in constructor (like Safari)
-         audioCtx = new AudioContextClass();
+         console.warn("Standard AudioContext Init Failed, retrying without sampleRate", err);
+         try {
+             audioCtx = new AudioContextClass();
+         } catch (e2) {
+             throw new Error("AudioContext creation failed");
+         }
       }
+      
+      if (!shouldPlayAudioRef.current) {
+          audioCtx.close();
+          return;
+      }
+
       audioContextRef.current = audioCtx;
 
       const audioBuffer = await decodeAudioData(decode(base64Audio), audioCtx, 24000, 1);
+      
+      if (!shouldPlayAudioRef.current) {
+          audioCtx.close();
+          return;
+      }
+
       const source = audioCtx.createBufferSource();
       audioSourceRef.current = source;
 
       source.buffer = audioBuffer;
       source.connect(audioCtx.destination);
       source.onended = () => {
-         setIsPlayingAudio(false);
-         audioSourceRef.current = null;
-         // Best practice to close context if finished and we recreate it every time
-         if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-             audioContextRef.current.close();
+         // Only reset if we naturally finished playing (state is running)
+         // If state is suspended, it means we are just paused, don't reset UI.
+         if (audioCtx.state === 'running') {
+             handleStopBroadcast();
          }
       };
       source.start();
+  };
+
+  const handleBroadcast = async () => {
+    try {
+      const base64Audio = await generateTeamAnnouncement(teams, eventName);
+      
+      if (!shouldPlayAudioRef.current) return;
+
+      if (!base64Audio) {
+          showToast("Failed to generate audio / 生成音频失败", 'error');
+          handleStopBroadcast();
+          return;
+      }
+      await playAudioFromBase64(base64Audio);
     } catch (e) {
       console.error("Audio Broadcast Error:", e);
       showToast("Error playing audio broadcast / 播放失败", 'error');
-      handleStopBroadcast(); // Cleanup
+      handleStopBroadcast();
     }
+  };
+
+  const handleBroadcastTeam = async (teamId: string) => {
+     const team = teams.find(t => t.id === teamId);
+     if (!team) return;
+
+     try {
+         const base64Audio = await generateSingleTeamAnnouncement(team, eventName);
+         
+         if (!shouldPlayAudioRef.current || playingTeamId !== teamId) return;
+
+         if (!base64Audio) {
+             showToast("Failed to generate team audio / 生成队伍音频失败", 'error');
+             handleStopBroadcast();
+             return;
+         }
+         await playAudioFromBase64(base64Audio);
+     } catch (e) {
+         console.error("Team Broadcast Error:", e);
+         showToast("Error playing team broadcast / 播放失败", 'error');
+         handleStopBroadcast();
+     }
   };
 
   const reset = () => {
@@ -695,6 +898,7 @@ const App: React.FC = () => {
         history={matchHistory}
         onLoad={handleLoadHistoryItem}
         onDelete={handleDeleteHistoryItem}
+        onImport={handleImportHistory}
       />
 
       <header className="pt-12 pb-8 px-6 text-center">
@@ -732,7 +936,6 @@ const App: React.FC = () => {
             isAiChatEnabled={isAiChatEnabled}
             onToggleAiChat={() => setIsAiChatEnabled(!isAiChatEnabled)}
             isAiTyping={isAiTyping}
-            // Task Library Props
             taskLibrary={taskLibrary}
             setTaskLibrary={setTaskLibrary}
           />
@@ -771,17 +974,40 @@ const App: React.FC = () => {
                 <button onClick={() => setIsResultQrOpen(true)} className="flex items-center gap-2 text-white hover:text-trae-purple transition-colors px-4 py-2 rounded-lg hover:bg-white/5 text-sm border border-white/5">
                   <QrCode className="w-4 h-4" /> <span className="hidden sm:inline">Join QR</span>
                 </button>
-                <button 
-                    onClick={handleBroadcast} 
-                    className={`flex items-center gap-2 transition-colors px-4 py-2 rounded-lg text-sm border ${
-                        isPlayingAudio 
-                        ? 'border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300 animate-pulse' 
-                        : 'border-trae-accent/30 text-trae-accent hover:bg-trae-accent/10 hover:text-white'
-                    }`}
-                >
-                  {isPlayingAudio ? <Square className="w-4 h-4 fill-current" /> : <AudioLines className="w-4 h-4" />} 
-                  <span className="hidden sm:inline">{isPlayingAudio ? 'Stop / 停止' : 'Announce'}</span>
-                </button>
+                
+                <div className="flex items-center gap-1">
+                    {/* Main Toggle Button */}
+                    <button 
+                        onClick={() => toggleAudioPlayback('global')}
+                        className={`flex items-center gap-2 transition-colors px-4 py-2 rounded-lg text-sm border min-w-[130px] justify-center ${
+                            isPlayingAudio 
+                            ? 'border-trae-purple/30 text-trae-purple bg-trae-purple/10 hover:bg-trae-purple/20' 
+                            : isPaused
+                                ? 'border-yellow-500/30 text-yellow-500 bg-yellow-500/10 hover:bg-yellow-500/20'
+                                : 'border-trae-accent/30 text-trae-accent hover:bg-trae-accent/10 hover:text-white'
+                        }`}
+                    >
+                        {isPlayingAudio ? (
+                            <> <Pause className="w-4 h-4 fill-current" /> Pause / 暂停 </>
+                        ) : isPaused ? (
+                            <> <Play className="w-4 h-4 fill-current" /> Resume / 继续 </>
+                        ) : (
+                            <> <AudioLines className="w-4 h-4" /> Announce All </>
+                        )}
+                    </button>
+
+                    {/* Dedicated Stop Button (Visible when Active or Paused) */}
+                    {(isPlayingAudio || isPaused) && (
+                        <button
+                            onClick={handleStopBroadcast}
+                            className="p-2 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"
+                            title="Stop Broadcast"
+                        >
+                            <Square className="w-4 h-4 fill-current" />
+                        </button>
+                    )}
+                </div>
+
                 <button onClick={handleShare} className="flex items-center gap-2 text-trae-purple hover:text-white transition-colors px-4 py-2 rounded-lg hover:bg-trae-purple/10 text-sm border border-trae-purple/30">
                   <Share2 className="w-4 h-4" /> <span className="hidden sm:inline">Share</span>
                 </button>
@@ -816,7 +1042,13 @@ const App: React.FC = () => {
                   team={team} 
                   index={idx} 
                   onUpdateTeam={handleUpdateTeam}
-                  taskLibrary={taskLibrary} // Pass library to card
+                  taskLibrary={taskLibrary}
+                  onBroadcast={(id) => toggleAudioPlayback('team', id)}
+                  isPlaying={playingTeamId === team.id}
+                  isPaused={isPaused}
+                  eventName={eventName}
+                  eventTheme={eventTheme}
+                  onRegenerate={handleRegenerateTeam}
                 />
               ))}
             </div>

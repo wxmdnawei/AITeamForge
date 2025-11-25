@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import Peer from 'peerjs';
-import { Send, CheckCircle2, AlertCircle, Terminal, Loader2, MessageSquare, Users, Hash } from 'lucide-react';
+import { Send, CheckCircle2, AlertCircle, Terminal, Loader2, MessageSquare, Users } from 'lucide-react';
 import Background from './Background';
 import { Team } from '../types';
+import { PEER_CONFIG } from '../services/peerConfig'; // Import Config
 
 interface JoinScreenProps {
   hostId: string;
@@ -33,6 +34,7 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const peerRef = useRef<Peer | null>(null);
   const connRef = useRef<any>(null);
+  const peerInitTimeoutRef = useRef<any>(null);
   
   // Refs for state access inside event listeners
   const nameRef = useRef(name);
@@ -48,148 +50,186 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
 
   // 1. Load Session Logic
   useEffect(() => {
-    const savedSession = localStorage.getItem(STORAGE_KEY);
-    if (savedSession) {
-      try {
+    try {
+      const savedSession = localStorage.getItem(STORAGE_KEY);
+      if (savedSession) {
         const session = JSON.parse(savedSession);
         if (session.name) setName(session.name);
         if (session.chatMessages) setChatMessages(session.chatMessages);
         if (session.myTeam) {
             setMyTeam(session.myTeam);
-            // If they have a team, default to team view if they were there
-            // For simplicity, we default to lobby or keep last used if we saved it (we didn't save activeChannelId yet, but could)
-            // Let's auto-switch to team if it exists to be helpful
             setActiveChannelId(session.myTeam.id); 
         }
-      } catch (e) {
-        console.error("Failed to load session", e);
       }
+    } catch (e) {
+      console.error("Failed to load session", e);
     }
-  }, [hostId]);
+  }, [hostId, STORAGE_KEY]);
 
   // 2. Save Session Logic
   useEffect(() => {
-    // Only save if we have a name (meaning we successfully joined at some point)
     if (name) {
-      const session = {
-        name,
-        chatMessages,
-        myTeam,
-        timestamp: Date.now()
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+      try {
+        const session = {
+            name,
+            chatMessages,
+            myTeam,
+            timestamp: Date.now()
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+      } catch (e) {
+        console.warn("Failed to save session", e);
+      }
     }
-  }, [name, chatMessages, myTeam, hostId]);
+  }, [name, chatMessages, myTeam, hostId, STORAGE_KEY]);
 
-  useEffect(() => {
+  const initPeer = () => {
     if (!hostId) {
-      setStatus('error');
-      setErrorMsg('Missing Host ID / 缺少主机 ID');
-      return;
+        setStatus('error');
+        setErrorMsg('Missing Host ID / 缺少主机 ID');
+        return;
     }
 
-    const peer = new Peer();
+    // Clean up existing if retrying
+    if (peerRef.current) {
+        peerRef.current.destroy();
+        peerRef.current = null;
+    }
+
+    console.log("Initializing Peer with optimized config...");
+    const peer = new Peer(PEER_CONFIG);
     peerRef.current = peer;
 
+    // Connection Timeout Watchdog (8s)
+    if (peerInitTimeoutRef.current) clearTimeout(peerInitTimeoutRef.current);
+    peerInitTimeoutRef.current = setTimeout(() => {
+        if (peer && !peer.id && !peer.destroyed) {
+            console.warn("Peer init timeout. Retrying...");
+            setErrorMsg("Loading slow... Retrying connection...");
+            initPeer(); // Retry
+        }
+    }, 8000);
+
     peer.on('open', (id) => {
-      console.log('My Peer ID:', id);
-      const conn = peer.connect(hostId);
-      
-      conn.on('open', () => {
-        console.log('Connected to host');
-        connRef.current = conn;
-
-        // Auto-Rejoin Logic: If we have a saved name, re-register with host and show UI
-        if (nameRef.current) {
-           console.log("Auto-rejoining as", nameRef.current);
-           conn.send({ type: 'join', name: nameRef.current });
-           setStatus('success');
-        } else {
-           setStatus('connected');
-        }
-      });
-
-      conn.on('data', (data: any) => {
-        // Handle Chat
-        if (data && data.type === 'chat') {
-          setChatMessages(prev => {
-            // Avoid duplicates if re-hydration overlaps (though simple append usually fine with unique IDs)
-            if (prev.some(m => m.id === data.id)) return prev;
-            return [...prev, {
-                id: data.id,
-                sender: data.sender,
-                text: data.text,
-                isHost: data.isHost,
-                timestamp: data.timestamp,
-                channelId: data.channelId || 'lobby',
-                isSystem: data.isSystem
-            }];
-          });
-        }
+        console.log('My Peer ID:', id);
+        if (peerInitTimeoutRef.current) clearTimeout(peerInitTimeoutRef.current);
         
-        // Handle Team Assignment
-        if (data && data.type === 'team_assignment') {
-           console.log("Assigned to team:", data.teamInfo);
-           setMyTeam(data.teamInfo);
-           setActiveChannelId(data.teamId);
-           
-           setChatMessages(prev => [...prev, {
-              id: Date.now().toString() + Math.random(),
-              sender: 'System',
-              text: `You joined team ${data.teamName}. / 你加入了 ${data.teamName}.`,
-              isHost: false,
-              timestamp: Date.now(),
-              channelId: data.teamId,
-              isSystem: true
-           }]);
-        }
-      });
+        const conn = peer.connect(hostId, { reliable: true });
+        
+        conn.on('open', () => {
+            console.log('Connected to host');
+            connRef.current = conn;
 
-      conn.on('error', (err) => {
-        console.error('Connection error:', err);
-        if (!connRef.current || !connRef.current.open) {
-             // Only show error if we aren't already 'success' (which means rejoining)
-             // If we are 'success', we might want to show a toast instead of blocking screen
-             if (status !== 'success') {
-                setStatus('error');
-                setErrorMsg('Failed to connect to host. / 连接主机失败。');
-             }
-        }
-      });
+            // Auto-Rejoin Logic
+            if (nameRef.current) {
+                console.log("Auto-rejoining as", nameRef.current);
+                conn.send({ type: 'join', name: nameRef.current });
+                setStatus('success');
+            } else {
+                setStatus('connected');
+            }
+        });
 
-      conn.on('close', () => {
-         setTimeout(() => {
-             if (!connRef.current || !connRef.current.open) {
-                // If user was already in chat, don't block screen, just show disconnected state maybe?
-                // For now, error screen is safest to prompt refresh
-                setStatus('error');
-                setErrorMsg('Host disconnected. / 主机已断开。');
-             }
-         }, 2000);
-      });
+        conn.on('data', (data: any) => {
+            // Handle Chat
+            if (data && data.type === 'chat') {
+                setChatMessages(prev => {
+                    if (prev.some(m => m.id === data.id)) return prev;
+                    return [...prev, {
+                        id: data.id,
+                        sender: data.sender,
+                        text: data.text,
+                        isHost: data.isHost,
+                        timestamp: data.timestamp,
+                        channelId: data.channelId || 'lobby',
+                        isSystem: data.isSystem
+                    }];
+                });
+            }
+            
+            // Handle Team Assignment
+            if (data && data.type === 'team_assignment') {
+                console.log("Assigned to team:", data.teamInfo);
+                setMyTeam(data.teamInfo);
+                setActiveChannelId(data.teamId);
+                
+                setChatMessages(prev => [...prev, {
+                    id: Date.now().toString() + Math.random(),
+                    sender: 'System',
+                    text: `You joined team ${data.teamName}. / 你加入了 ${data.teamName}.`,
+                    isHost: false,
+                    timestamp: Date.now(),
+                    channelId: data.teamId,
+                    isSystem: true
+                }]);
+            }
+            
+            // Handle History Sync
+            if (data && data.type === 'chat_history') {
+                console.log("Syncing history:", data.history.length, "messages");
+                setChatMessages(prev => {
+                    const existingIds = new Set(prev.map(m => m.id));
+                    const newMsgs = data.history.filter((m: ChatMessage) => !existingIds.has(m.id));
+                    return [...prev, ...newMsgs].sort((a, b) => a.timestamp - b.timestamp);
+                });
+            }
+        });
+
+        conn.on('error', (err) => {
+            console.error('Connection error:', err);
+            if (!connRef.current || !connRef.current.open) {
+                if (status !== 'success') {
+                    // Silent retry for connection issues
+                    console.warn("Silent retry due to connection error");
+                }
+            }
+        });
+
+        conn.on('close', () => {
+            setTimeout(() => {
+                if (!connRef.current || !connRef.current.open) {
+                    // Don't show error screen immediately, try to reconnect
+                    console.warn('Host disconnected.');
+                }
+            }, 2000);
+        });
     });
     
     // Auto-Reconnect logic
     peer.on('disconnected', () => {
-        console.log('Connection to PeerServer lost. Reconnecting...');
-        setTimeout(() => {
-            if (peer && !peer.destroyed) {
-                peer.reconnect();
-            }
-        }, 2000);
+        console.log('Connection to PeerServer lost.');
+        if (peer && !peer.destroyed && peer.disconnected) {
+             console.log('Attempting to reconnect...');
+             peer.reconnect();
+        }
     });
 
     peer.on('error', (err) => {
-      console.error('Peer error:', err);
-      if (err.type !== 'disconnected' && err.type !== 'peer-unavailable') {
-          if (status !== 'success') {
-             setStatus('error');
-             setErrorMsg('Network error. Please retry. / 网络错误，请重试。');
-          }
-      }
-    });
+        // Suppress "Lost connection to server" console error spam
+        if (err.type === 'network' || err.message === 'Lost connection to server') {
+            console.log('PeerJS network hiccup. Checking reconnection...');
+            if (peer && !peer.destroyed && peer.disconnected) {
+                peer.reconnect();
+            }
+            return; 
+        }
 
+        console.error('Peer error:', err);
+        
+        if (err.type !== 'disconnected' && err.type !== 'peer-unavailable') {
+            if (status !== 'success') {
+                setStatus('error');
+                setErrorMsg('Network error. Retrying...');
+                setTimeout(initPeer, 3000); // Retry after 3s
+            }
+        }
+    });
+  };
+
+  useEffect(() => {
+    initPeer();
     return () => {
+      if (peerInitTimeoutRef.current) clearTimeout(peerInitTimeoutRef.current);
       if (peerRef.current) {
         peerRef.current.destroy();
         peerRef.current = null;
@@ -242,8 +282,10 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
     // Optimistic update
     setChatMessages(prev => [...prev, msg]);
 
-    // Send to host
-    connRef.current.send({ ...msg, type: 'chat' });
+    try {
+        connRef.current.send({ ...msg, type: 'chat' });
+    } catch(e) { console.warn("Send failed", e); }
+    
     setChatInput('');
   };
 
@@ -253,8 +295,8 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
         setName('');
         setChatMessages([]);
         setMyTeam(null);
-        localStorage.removeItem(STORAGE_KEY);
-        window.location.reload(); // Cleanest way to ensure fresh peer state
+        try { localStorage.removeItem(STORAGE_KEY); } catch(e) {}
+        window.location.reload(); 
     }
   };
 
@@ -276,6 +318,7 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
             <div className="flex flex-col items-center py-8 space-y-4">
               <Loader2 className="w-8 h-8 text-trae-blue animate-spin" />
               <p className="text-gray-400">Connecting to host... / 连接中...</p>
+              {errorMsg && <p className="text-xs text-yellow-400 animate-pulse">{errorMsg}</p>}
             </div>
           )}
 
@@ -331,7 +374,7 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
                 <p>{errorMsg}</p>
               </div>
               <button
-                onClick={() => window.location.reload()}
+                onClick={() => initPeer()} // Retry manually
                 className="px-6 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-sm text-gray-300"
               >
                 Retry / 重试
@@ -342,8 +385,7 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
           {/* CHAT SECTION (Always visible if connected/success) */}
           {(status === 'success') && (
             <div className="mt-8 pt-6 border-t border-white/10">
-              
-              {/* Channel Tabs */}
+              {/* ... Chat UI remains same ... */}
               <div className="flex items-center gap-4 mb-3">
                   <button 
                     onClick={() => setActiveChannelId('lobby')}

@@ -1,6 +1,21 @@
+
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { GeneratedTeamMetadata, Team, TaskItem } from "../types";
-import { v4 as uuidv4 } from 'uuid';
+
+// Robust UUID Generator (replaces 'uuid' library to prevent load errors)
+export const generateUUID = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try {
+      return crypto.randomUUID();
+    } catch (e) {
+      // Fallback if crypto.randomUUID fails (e.g. insecure context)
+    }
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
 
 // Safely access process.env to avoid "Uncaught ReferenceError: process is not defined"
 const getApiKey = () => {
@@ -220,7 +235,7 @@ export const generateTaskLibrarySuggestions = async (eventName: string, eventThe
       if (!Array.isArray(raw)) return [];
 
       return raw.map((r: any) => ({ 
-        id: uuidv4(), 
+        id: generateUUID(), 
         title: r.title || "New Task", 
         titleZh: r.titleZh || r.title || "新任务" 
       }));
@@ -256,6 +271,69 @@ export const generateTeamAnnouncement = async (teams: Team[], eventName: string)
         return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     });
   } catch (error) { return undefined; }
+};
+
+export const generateSingleTeamAnnouncement = async (team: Team, eventName: string): Promise<string | undefined> => {
+  if (!apiKey) return undefined;
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    let script = `Attention please! Introducing: ${team.name}. 请注意！接下来介绍：${team.nameZh || team.name}. \n\n`;
+    script += `Motto: "${team.motto}". 口号："${team.mottoZh || ''}". \n`;
+    if (team.topic) script += `Assigned Mission: ${team.topic}. 任务：${team.topicZh || ''}. \n`;
+    
+    const memberNames = team.members.map(m => m.name).join(", ");
+    script += `Operatives 成员: ${memberNames}. \n`;
+    
+    script += `Your mission, should you choose to accept it: Answer this doubt. ${team.icebreaker}. 思考题：${team.icebreakerZh || ''}. \n`;
+    script += `Good luck, agents!`;
+    
+    return await withRetry(async () => {
+        const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: [{ parts: [{ text: script }] }],
+        config: { responseModalities: [Modality.AUDIO], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Fenrir' } } } },
+        });
+        return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    });
+  } catch (error) { return undefined; }
+};
+
+export const generateTeamPoster = async (team: Team, eventName: string, eventTheme: string): Promise<string | undefined> => {
+  if (!apiKey) return undefined;
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    
+    // We strictly request a BACKGROUND image because we will overlay accurate text in the UI.
+    const prompt = `Design a high-quality, artistic, text-free background art for a promotional poster.
+    
+    Team Name Identity: "${team.name}" (${team.nameZh || ''}).
+    Mascot Concept: ${team.mascotEmoji}.
+    Context: ${eventName} - ${eventTheme}.
+    
+    Visual Requirements:
+    1. Style: Cyberpunk, Futuristic, Clean Tech, or Minimalist (matching the team name).
+    2. Composition: Center the main artistic element (mascot/symbol). Leave negative space at the top for a large title and at the bottom corners for text details.
+    3. Lighting: Dramatic, cinematic.
+    4. IMPORTANT: DO NOT include any text, letters, or numbers in the image itself. It should be pure visual art.
+    `;
+
+    const response = await withRetry(async () => {
+        return await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [{ text: prompt }] },
+        });
+    });
+    
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+        if (part.inlineData) {
+            return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+        }
+    }
+    return undefined;
+  } catch (e) {
+    console.error("Poster gen error", e);
+    return undefined;
+  }
 };
 
 export const generateAIChatResponse = async (history: any[], eventName: string, eventTheme: string, channelName: string): Promise<string> => {

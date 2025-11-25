@@ -18,6 +18,7 @@ export interface Team {
   mascotEmoji: string;
   topic?: string;
   topicZh?: string;
+  posterUrl?: string; // Base64 image URL
 }
 
 export interface GeneratedTeamMetadata {

@@ -1,6 +1,6 @@
 
-import React from 'react';
-import { X, Trash2, Upload, Calendar, Users, Clock, ArrowRight } from 'lucide-react';
+import React, { useRef } from 'react';
+import { X, Trash2, Upload, Calendar, Users, Clock, ArrowRight, Download, FileJson } from 'lucide-react';
 import { SavedMatch } from '../types';
 
 interface HistoryModalProps {
@@ -9,6 +9,7 @@ interface HistoryModalProps {
   history: SavedMatch[];
   onLoad: (match: SavedMatch) => void;
   onDelete: (id: string) => void;
+  onImport: (matches: SavedMatch[]) => void;
 }
 
 const HistoryModal: React.FC<HistoryModalProps> = ({
@@ -16,14 +17,55 @@ const HistoryModal: React.FC<HistoryModalProps> = ({
   onClose,
   history,
   onLoad,
-  onDelete
+  onDelete,
+  onImport
 }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   if (!isOpen) return null;
 
   const formatDate = (ts: number) => {
     return new Date(ts).toLocaleString(undefined, {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
+  };
+
+  const handleExport = () => {
+    if (history.length === 0) return;
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(history, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", `trae_history_export_${new Date().toISOString().slice(0,10)}.json`);
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        if (Array.isArray(json)) {
+            onImport(json);
+        } else {
+            alert("Invalid file format. Expected an array of records. / 文件格式错误。");
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Failed to parse JSON. / 解析 JSON 失败。");
+      }
+    };
+    reader.readAsText(file);
+    // Reset input so same file can be selected again if needed
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   return (
@@ -97,10 +139,34 @@ const HistoryModal: React.FC<HistoryModalProps> = ({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="p-3 border-t border-white/10 bg-white/5 rounded-b-2xl text-center">
-           <p className="text-[10px] text-gray-500">
-             Records are stored locally in your browser. / 记录保存在您的浏览器本地缓存中。
+        {/* Footer with Import/Export */}
+        <div className="p-3 border-t border-white/10 bg-white/5 rounded-b-2xl flex items-center justify-between">
+           <div className="flex items-center gap-2">
+               <input 
+                   type="file" 
+                   ref={fileInputRef} 
+                   onChange={handleFileChange} 
+                   className="hidden" 
+                   accept=".json"
+               />
+               <button 
+                onClick={handleImportClick}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-gray-300 hover:text-white border border-white/5 transition-colors"
+               >
+                   <FileJson className="w-3.5 h-3.5" />
+                   <span>Import / 导入</span>
+               </button>
+               <button 
+                onClick={handleExport}
+                disabled={history.length === 0}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-gray-300 hover:text-white border border-white/5 transition-colors disabled:opacity-50"
+               >
+                   <Download className="w-3.5 h-3.5" />
+                   <span>Export All / 导出全部</span>
+               </button>
+           </div>
+           <p className="text-[10px] text-gray-500 hidden sm:block">
+             Local Storage / 本地存储
            </p>
         </div>
       </div>

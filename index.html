@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -15,7 +16,6 @@
     "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
     "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
     "framer-motion": "https://aistudiocdn.com/framer-motion@^11.0.8",
-    "uuid": "https://aistudiocdn.com/uuid@^13.0.0",
     "peerjs": "https://esm.sh/peerjs@1.5.2",
     "buffer": "https://esm.sh/buffer@6.0.3",
     "html2canvas": "https://esm.sh/html2canvas@1.4.1"
@@ -25,7 +25,16 @@
     <script>
       // Critical Polyfills: Must run before any modules load
       window.global = window;
-      window.process = window.process || { env: { NODE_ENV: 'production' } };
+      window.process = {
+        env: { NODE_ENV: 'production' },
+        nextTick: function(cb) { setTimeout(cb, 0); },
+        browser: true,
+        version: ''
+      };
+      // Temporary Buffer placeholder to prevent early ReferenceErrors
+      if (typeof window.Buffer === 'undefined') {
+        window.Buffer = { isBuffer: () => false }; 
+      }
     </script>
     <script>
       tailwind.config = {

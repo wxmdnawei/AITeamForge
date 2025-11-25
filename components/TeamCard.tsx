@@ -1,15 +1,22 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Team, TaskItem } from '../types';
-import { MessageCircle, User, Sparkles, Copy, Check, Edit2, X, Smile, Target, ChevronDown, Download, Loader2 } from 'lucide-react';
+import { MessageCircle, User, Sparkles, Copy, Check, Edit2, X, Target, ChevronDown, Download, Loader2, Volume2, BookOpen, Image as ImageIcon, RefreshCw, Play, Pause } from 'lucide-react';
 import { motion, Variants } from 'framer-motion';
 import html2canvas from 'html2canvas';
+import { generateTeamPoster } from '../services/geminiService';
 
 interface TeamCardProps {
   team: Team;
   index: number;
   onUpdateTeam: (id: string, updates: Partial<Team>) => void;
   taskLibrary?: TaskItem[];
+  onBroadcast: (id: string) => void;
+  isPlaying: boolean; // Effectively "Is Active Context"
+  isPaused: boolean;  // New prop to determine icon state
+  eventName: string;
+  eventTheme: string;
+  onRegenerate: (id: string) => Promise<void>;
 }
 
 const EMOJI_OPTIONS = [
@@ -68,13 +75,20 @@ const TooltipWrapper = ({ text, children, className = "" }: { text: React.ReactN
   </div>
 );
 
-const TeamCard: React.FC<TeamCardProps> = ({ team, index, onUpdateTeam, taskLibrary = [] }) => {
+const TeamCard: React.FC<TeamCardProps> = ({ team, index, onUpdateTeam, taskLibrary = [], onBroadcast, isPlaying, isPaused, eventName, eventTheme, onRegenerate }) => {
   const [copied, setCopied] = useState(false);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isSnapshotting, setIsSnapshotting] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  
+  // Poster Generation State
+  const [isGeneratingPoster, setIsGeneratingPoster] = useState(false);
+  const [showPosterModal, setShowPosterModal] = useState(false);
+  const [isDownloadingPoster, setIsDownloadingPoster] = useState(false);
+  const posterRef = useRef<HTMLDivElement>(null);
 
   // Member Editing State
   const [activeMemberId, setActiveMemberId] = useState<string | null>(null);
@@ -89,6 +103,7 @@ const TeamCard: React.FC<TeamCardProps> = ({ team, index, onUpdateTeam, taskLibr
   const [isEditingTask, setIsEditingTask] = useState(false);
   const [tempTask, setTempTask] = useState(team.topic || '');
   const [tempTaskZh, setTempTaskZh] = useState(team.topicZh || '');
+  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
 
   // Close pickers when clicking outside
   useEffect(() => {
@@ -144,6 +159,16 @@ const TeamCard: React.FC<TeamCardProps> = ({ team, index, onUpdateTeam, taskLibr
     }
   };
 
+  const handleRegenerate = async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setIsRegenerating(true);
+      try {
+          await onRegenerate(team.id);
+      } finally {
+          setIsRegenerating(false);
+      }
+  };
+
   const handleDownloadImage = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!cardRef.current) return;
@@ -188,6 +213,47 @@ const TeamCard: React.FC<TeamCardProps> = ({ team, index, onUpdateTeam, taskLibr
     }
   };
 
+  const handleGeneratePoster = async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (team.posterUrl) {
+          setShowPosterModal(true);
+          return;
+      }
+
+      setIsGeneratingPoster(true);
+      const poster = await generateTeamPoster(team, eventName, eventTheme);
+      if (poster) {
+          onUpdateTeam(team.id, { posterUrl: poster });
+          setShowPosterModal(true);
+      } else {
+          alert("Failed to generate poster. Try again. / 海报生成失败，请重试。");
+      }
+      setIsGeneratingPoster(false);
+  };
+
+  const handleDownloadPoster = async () => {
+      if (!posterRef.current) return;
+      setIsDownloadingPoster(true);
+      try {
+          const canvas = await html2canvas(posterRef.current, {
+              useCORS: true,
+              scale: 2,
+              backgroundColor: '#000000'
+          });
+          const link = document.createElement('a');
+          link.download = `Trae_Poster_${team.name.replace(/\s+/g, '_')}.png`;
+          link.href = canvas.toDataURL('image/png');
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+      } catch (e) {
+          console.error("Poster download failed", e);
+          alert("Failed to download poster.");
+      } finally {
+          setIsDownloadingPoster(false);
+      }
+  };
+
   const handleEmojiSelect = (emoji: string) => {
     onUpdateTeam(team.id, { mascotEmoji: emoji });
     setIsPickerOpen(false);
@@ -209,6 +275,7 @@ const TeamCard: React.FC<TeamCardProps> = ({ team, index, onUpdateTeam, taskLibr
   const saveEditingTask = () => {
     onUpdateTeam(team.id, { topic: tempTask, topicZh: tempTaskZh });
     setIsEditingTask(false);
+    setIsLibraryOpen(false);
   };
 
   const selectTaskFromLibrary = (taskId: string) => {
@@ -217,6 +284,7 @@ const TeamCard: React.FC<TeamCardProps> = ({ team, index, onUpdateTeam, taskLibr
         setTempTask(item.title);
         setTempTaskZh(item.titleZh);
     }
+    setIsLibraryOpen(false);
   };
 
   // Animation Variants
@@ -244,6 +312,101 @@ const TeamCard: React.FC<TeamCardProps> = ({ team, index, onUpdateTeam, taskLibr
   };
 
   return (
+    <>
+    {/* Poster Modal - Composite View */}
+    {showPosterModal && team.posterUrl && (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-fade-in" data-html2canvas-ignore>
+          <div className="relative w-full max-w-[450px] shadow-2xl flex flex-col">
+              {/* Close Button */}
+              <button 
+                  onClick={() => setShowPosterModal(false)} 
+                  className="absolute -top-4 -right-4 bg-white/10 hover:bg-red-500 text-white rounded-full p-2 backdrop-blur transition-colors z-[110] border border-white/10"
+              >
+                  <X className="w-5 h-5" />
+              </button>
+              
+              {/* Composite Poster Area */}
+              <div 
+                ref={posterRef} 
+                className="relative w-full aspect-[2/3] bg-[#0A0A0B] rounded-xl overflow-hidden shadow-2xl border border-white/10 group select-none"
+              >
+                 {/* AI Background Image */}
+                 <img src={team.posterUrl} alt="Poster Background" className="absolute inset-0 w-full h-full object-cover" crossOrigin="anonymous" />
+                 
+                 {/* Gradient Overlays for Readability */}
+                 <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-black/60" />
+                 <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-transparent" />
+
+                 {/* Poster Content Overlay */}
+                 <div className="absolute inset-0 p-6 flex flex-col">
+                    {/* Header: Name & Motto */}
+                    <div className="text-center mt-8 space-y-3">
+                        <div className="inline-block relative">
+                            <h1 className="text-4xl md:text-5xl font-display font-black text-white uppercase tracking-wider drop-shadow-[0_4px_10px_rgba(0,0,0,0.8)] leading-none">
+                                {team.name}
+                            </h1>
+                            {team.nameZh && (
+                                <h2 className="text-lg text-trae-blue font-display font-bold mt-1 tracking-widest drop-shadow-lg">
+                                    {team.nameZh}
+                                </h2>
+                            )}
+                        </div>
+                        <div className="w-16 h-1 bg-trae-purple mx-auto rounded-full" />
+                        <p className="text-base md:text-lg text-gray-200 font-serif italic max-w-[90%] mx-auto leading-relaxed drop-shadow-md opacity-90">
+                            "{team.motto}"
+                        </p>
+                    </div>
+
+                    <div className="flex-grow" />
+
+                    {/* Footer: Members List (Corner Doc Style) */}
+                    <div className="flex justify-between items-end gap-4">
+                        {/* Bottom Left: Event Info */}
+                        <div className="text-left opacity-70">
+                             <p className="text-[10px] text-trae-accent uppercase tracking-[0.2em] font-bold mb-1">Event</p>
+                             <p className="text-[9px] text-gray-300 font-mono uppercase leading-tight max-w-[100px]">{eventName}</p>
+                             <p className="text-[9px] text-gray-400 font-mono mt-0.5">{new Date().toLocaleDateString()}</p>
+                        </div>
+
+                        {/* Bottom Right: Members (Document Style) */}
+                        <div className="text-right max-w-[160px]">
+                             <div className="flex items-center justify-end gap-2 mb-2 opacity-80">
+                                 <div className="h-px w-8 bg-trae-blue" />
+                                 <p className="text-[10px] text-trae-blue uppercase tracking-[0.2em] font-bold">Operatives</p>
+                             </div>
+                             <div className="flex flex-wrap justify-end gap-x-3 gap-y-1 text-xs font-mono text-gray-200 leading-snug">
+                                 {team.members.map((m, idx) => (
+                                     <span key={m.id} className="whitespace-nowrap">
+                                         {m.name}{idx < team.members.length - 1 ? '' : ''}
+                                     </span>
+                                 ))}
+                             </div>
+                        </div>
+                    </div>
+                 </div>
+                 
+                 {/* Watermark */}
+                 <div className="absolute bottom-2 left-1/2 -translate-x-1/2 opacity-30">
+                     <p className="text-[8px] text-white font-sans tracking-widest">GENERATED BY TRAE MATCHMAKER</p>
+                 </div>
+              </div>
+
+              {/* Action Bar */}
+              <div className="bg-[#18181B] p-4 rounded-b-2xl border-t border-white/10 flex items-center justify-between">
+                  <span className="text-xs text-gray-500">High-Res Composite</span>
+                  <button 
+                      onClick={handleDownloadPoster}
+                      disabled={isDownloadingPoster}
+                      className="flex items-center gap-2 px-6 py-2 bg-trae-purple hover:bg-trae-purple/90 text-white rounded-lg transition-all font-bold text-sm shadow-lg hover:shadow-trae-purple/20 disabled:opacity-50 disabled:cursor-wait"
+                  >
+                      {isDownloadingPoster ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                      Download Poster
+                  </button>
+              </div>
+          </div>
+      </div>
+    )}
+
     <motion.div
       ref={cardRef}
       data-card-root="true"
@@ -267,6 +430,80 @@ const TeamCard: React.FC<TeamCardProps> = ({ team, index, onUpdateTeam, taskLibr
       <div className={`absolute -top-10 -right-10 w-32 h-32 bg-trae-accent/20 rounded-full blur-3xl transition-opacity duration-700 pointer-events-none
         ${isSnapshotting ? 'opacity-50' : 'opacity-0 group-hover:opacity-50'}`} 
       />
+
+      {/* Floating Action Toolbar - Positioned absolutely in top-right to prevent layout overflow */}
+      {!isEditingName && (
+        <div 
+            className={`absolute top-4 right-4 z-40 flex items-center gap-1 bg-[#18181B]/90 backdrop-blur-md border border-white/10 p-1.5 rounded-xl shadow-xl transition-all duration-300 
+            ${isSnapshotting ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0'}`}
+            data-html2canvas-ignore
+        >
+            <TooltipWrapper text={isPlaying ? (isPaused ? "Resume Broadcast / 继续播报" : "Pause Broadcast / 暂停播报") : "Broadcast Team / 播报此队"}>
+                <button
+                onClick={(e) => { e.stopPropagation(); onBroadcast(team.id); }}
+                className={`p-1.5 rounded-lg focus:opacity-100 focus:outline-none transition-all ${
+                    isPlaying 
+                    ? isPaused ? 'text-yellow-500 bg-yellow-500/10 hover:bg-yellow-500/20' : 'text-red-400 bg-red-500/10 hover:bg-red-500/20 animate-pulse' 
+                    : 'text-gray-400 hover:text-trae-accent hover:bg-white/10'
+                }`}
+                >
+                    {isPlaying ? (
+                        isPaused ? <Play className="w-3.5 h-3.5 fill-current" /> : <Pause className="w-3.5 h-3.5 fill-current" />
+                    ) : (
+                        <Volume2 className="w-3.5 h-3.5" />
+                    )}
+                </button>
+            </TooltipWrapper>
+
+            <TooltipWrapper text="Regenerate Identity / 重新生成">
+                <button
+                    onClick={handleRegenerate}
+                    disabled={isRegenerating}
+                    className="p-1.5 text-gray-400 hover:text-trae-blue hover:bg-white/10 rounded-lg focus:opacity-100 focus:outline-none transition-all disabled:opacity-50"
+                >
+                    {isRegenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin text-trae-blue" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                </button>
+            </TooltipWrapper>
+
+            <TooltipWrapper text={team.posterUrl ? "View Poster / 查看海报" : "Generate Poster / 生成海报"}>
+                <button
+                    onClick={handleGeneratePoster}
+                    disabled={isGeneratingPoster}
+                    className={`p-1.5 rounded-lg focus:opacity-100 focus:outline-none transition-all ${team.posterUrl ? 'text-trae-purple hover:bg-trae-purple/10' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+                >
+                    {isGeneratingPoster ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ImageIcon className="w-3.5 h-3.5" />}
+                </button>
+            </TooltipWrapper>
+
+            <TooltipWrapper text="Edit Team Name / 编辑名称">
+                <button
+                onClick={() => setIsEditingName(true)}
+                className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg focus:opacity-100 focus:outline-none"
+                >
+                <Edit2 className="w-3.5 h-3.5" />
+                </button>
+            </TooltipWrapper>
+            
+            <TooltipWrapper text={copied ? "Copied! / 已复制" : "Copy Team Info / 复制信息"}>
+                <button
+                onClick={handleCopyContent}
+                className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg focus:opacity-100 focus:outline-none"
+                >
+                {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+            </TooltipWrapper>
+            
+            <TooltipWrapper text="Download Image / 下载截图">
+                <button
+                onClick={handleDownloadImage}
+                disabled={isDownloading}
+                className="p-1.5 text-gray-400 hover:text-trae-accent hover:bg-white/10 rounded-lg focus:opacity-100 focus:outline-none"
+                >
+                {isDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                </button>
+            </TooltipWrapper>
+        </div>
+      )}
 
       <div className="p-6 relative z-10 flex flex-col h-full">
         {/* Header */}
@@ -307,11 +544,11 @@ const TeamCard: React.FC<TeamCardProps> = ({ team, index, onUpdateTeam, taskLibr
                 )}
               </div>
 
-              <div className="flex flex-col flex-1 min-w-0">
+              <div className="flex flex-col flex-1 min-w-0 pt-1">
                 {!isEditingName ? (
                   // View Mode (Name)
                   <>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 pr-12">
                       <TooltipWrapper text="Edit Team Name / 编辑名称">
                         <h3 
                           onClick={() => setIsEditingName(true)}
@@ -320,37 +557,6 @@ const TeamCard: React.FC<TeamCardProps> = ({ team, index, onUpdateTeam, taskLibr
                           {team.name}
                         </h3>
                       </TooltipWrapper>
-                      
-                      {/* Action Buttons */}
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200" data-html2canvas-ignore>
-                        <TooltipWrapper text="Edit Team Name / 编辑名称">
-                          <button
-                            onClick={() => setIsEditingName(true)}
-                            className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg focus:opacity-100 focus:outline-none"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                        </TooltipWrapper>
-                        
-                        <TooltipWrapper text={copied ? "Copied! / 已复制" : "Copy Team Info / 复制信息"}>
-                          <button
-                            onClick={handleCopyContent}
-                            className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg focus:opacity-100 focus:outline-none"
-                          >
-                            {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-                          </button>
-                        </TooltipWrapper>
-                        
-                        <TooltipWrapper text="Download Image / 下载截图">
-                          <button
-                            onClick={handleDownloadImage}
-                            disabled={isDownloading}
-                            className="p-1.5 text-gray-400 hover:text-trae-accent hover:bg-white/10 rounded-lg focus:opacity-100 focus:outline-none"
-                          >
-                            {isDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                          </button>
-                        </TooltipWrapper>
-                      </div>
                     </div>
                     {team.nameZh && (
                       <h4 
@@ -461,22 +667,35 @@ const TeamCard: React.FC<TeamCardProps> = ({ team, index, onUpdateTeam, taskLibr
                  <div className="relative z-10 space-y-2 animate-fade-in" data-html2canvas-ignore>
                      <div className="flex items-center justify-between">
                         <h5 className="text-xs font-bold text-trae-blue uppercase">Edit Task</h5>
+                        
+                        {/* Library Quick Pick Button */}
+                        {taskLibrary.length > 0 && (
+                            <button 
+                                onClick={() => setIsLibraryOpen(!isLibraryOpen)}
+                                className="text-[10px] flex items-center gap-1 text-trae-blue hover:text-white transition-colors px-2 py-0.5 rounded hover:bg-white/10"
+                            >
+                                <BookOpen className="w-3 h-3" />
+                                Library
+                                <ChevronDown className={`w-3 h-3 transition-transform ${isLibraryOpen ? 'rotate-180' : ''}`} />
+                            </button>
+                        )}
                      </div>
                      
-                     {/* Library Quick Pick */}
-                     {taskLibrary.length > 0 && (
-                        <div className="relative group/dropdown">
-                             <select 
-                                onChange={(e) => selectTaskFromLibrary(e.target.value)}
-                                className="w-full bg-white/5 border border-white/10 text-xs text-gray-300 rounded px-2 py-1 appearance-none focus:outline-none focus:ring-1 focus:ring-trae-blue cursor-pointer"
-                                defaultValue=""
-                             >
-                                 <option value="" disabled>Select from library / 从题库选择...</option>
+                     {/* Library Dropdown */}
+                     {isLibraryOpen && taskLibrary.length > 0 && (
+                        <div className="bg-[#18181B] border border-white/10 rounded-lg shadow-xl max-h-48 overflow-y-auto scrollbar-thin absolute top-6 right-0 left-0 z-50 animate-fade-in">
+                             <div className="p-1 space-y-0.5">
                                  {taskLibrary.map(t => (
-                                     <option key={t.id} value={t.id}>{t.title}</option>
+                                     <button 
+                                        key={t.id}
+                                        onClick={() => selectTaskFromLibrary(t.id)}
+                                        className="w-full text-left px-2 py-2 text-xs text-gray-300 hover:bg-trae-blue/20 hover:text-white rounded transition-colors flex flex-col gap-0.5"
+                                     >
+                                         <span className="font-medium truncate">{t.title}</span>
+                                         {t.titleZh && <span className="text-[10px] text-gray-500 truncate">{t.titleZh}</span>}
+                                     </button>
                                  ))}
-                             </select>
-                             <ChevronDown className="absolute right-2 top-1.5 w-3 h-3 text-gray-400 pointer-events-none" />
+                             </div>
                         </div>
                      )}
 
@@ -502,7 +721,7 @@ const TeamCard: React.FC<TeamCardProps> = ({ team, index, onUpdateTeam, taskLibr
                             <Check className="w-3 h-3" /> Save
                         </button>
                         <button 
-                            onClick={() => setIsEditingTask(false)}
+                            onClick={() => { setIsEditingTask(false); setIsLibraryOpen(false); }}
                             className="flex-1 bg-red-500/20 hover:bg-red-500/30 text-red-400 text-[10px] py-1 rounded flex items-center justify-center gap-1"
                         >
                             <X className="w-3 h-3" /> Cancel
@@ -591,6 +810,7 @@ const TeamCard: React.FC<TeamCardProps> = ({ team, index, onUpdateTeam, taskLibr
         </div>
       </div>
     </motion.div>
+    </>
   );
 };
 
