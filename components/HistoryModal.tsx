@@ -35,7 +35,7 @@ const HistoryModal: React.FC<HistoryModalProps> = ({
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(history, null, 2));
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", `trae_history_export_${new Date().toISOString().slice(0,10)}.json`);
+    downloadAnchorNode.setAttribute("download", `matchmaker_history_export_${new Date().toISOString().slice(0,10)}.json`);
     document.body.appendChild(downloadAnchorNode);
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
@@ -70,12 +70,12 @@ const HistoryModal: React.FC<HistoryModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-      <div className="bg-trae-card border border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[80vh]">
+      <div className="bg-theme-card border border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[80vh]">
         {/* Header */}
         <div className="p-5 border-b border-white/10 flex justify-between items-center bg-white/5 rounded-t-2xl">
           <div>
             <h3 className="text-xl font-display font-bold text-white flex items-center gap-2">
-              <Clock className="w-5 h-5 text-trae-purple" />
+              <Clock className="w-5 h-5 text-theme-primary" />
               Match History
             </h3>
             <p className="text-xs text-gray-400">Manage your saved team generations / 历史记录管理</p>
@@ -102,7 +102,7 @@ const HistoryModal: React.FC<HistoryModalProps> = ({
             history.map((match) => (
               <div 
                 key={match.id}
-                className="bg-black/20 border border-white/5 hover:border-trae-purple/30 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center gap-4 transition-all hover:bg-white/5 group"
+                className="bg-black/20 border border-white/5 hover:border-theme-primary/30 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center gap-4 transition-all hover:bg-white/5 group"
               >
                 <div className="flex-1 space-y-1">
                   <div className="flex items-center gap-2">
@@ -128,7 +128,7 @@ const HistoryModal: React.FC<HistoryModalProps> = ({
                   </button>
                   <button
                     onClick={() => onLoad(match)}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-trae-blue/10 text-trae-blue border border-trae-blue/20 hover:bg-trae-blue hover:text-white transition-all font-medium text-xs"
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-theme-secondary/10 text-theme-secondary border border-theme-secondary/20 hover:bg-theme-secondary hover:text-white transition-all font-medium text-xs"
                   >
                     <Upload className="w-3.5 h-3.5" />
                     Load Record

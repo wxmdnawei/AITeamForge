@@ -2,7 +2,7 @@
 import type { PeerJSOption } from 'peerjs';
 
 export const PEER_CONFIG: PeerJSOption = {
-  debug: 1, // Errors only in prod
+  debug: 0, // 0: Prints no logs, effectively silencing "Lost connection" errors in console
   config: {
     iceServers: [
       // Google Public STUN

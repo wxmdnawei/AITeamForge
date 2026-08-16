@@ -46,7 +46,7 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
 
   // Derived
   const filteredMessages = chatMessages.filter(m => (m.channelId || 'lobby') === activeChannelId);
-  const STORAGE_KEY = `trae_client_session_${hostId}`;
+  const STORAGE_KEY = `matchmaker_client_session_${hostId}`;
 
   // 1. Load Session Logic
   useEffect(() => {
@@ -198,19 +198,24 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
     // Auto-Reconnect logic
     peer.on('disconnected', () => {
         console.log('Connection to PeerServer lost.');
-        if (peer && !peer.destroyed && peer.disconnected) {
-             console.log('Attempting to reconnect...');
-             peer.reconnect();
-        }
+        // Add a delay to prevent spamming reconnection attempts
+        setTimeout(() => {
+            if (peer && !peer.destroyed && peer.disconnected) {
+                console.log('Attempting to reconnect...');
+                peer.reconnect();
+            }
+        }, 2000);
     });
 
     peer.on('error', (err) => {
         // Suppress "Lost connection to server" console error spam
-        if (err.type === 'network' || err.message === 'Lost connection to server') {
+        if (err.type === 'network' || err.type === 'disconnected' || err.message?.includes('Lost connection')) {
             console.log('PeerJS network hiccup. Checking reconnection...');
-            if (peer && !peer.destroyed && peer.disconnected) {
-                peer.reconnect();
-            }
+            setTimeout(() => {
+                if (peer && !peer.destroyed && peer.disconnected) {
+                    peer.reconnect();
+                }
+            }, 2000);
             return; 
         }
 
@@ -307,16 +312,16 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
       <div className="w-full max-w-md space-y-8 animate-fade-in-up">
         <div className="text-center space-y-2">
           <div className="flex items-center justify-center gap-2 mb-2">
-            <Terminal className="w-8 h-8 text-trae-purple" />
-            <h1 className="text-2xl font-display font-bold">Trae Join</h1>
+            <Terminal className="w-8 h-8 text-theme-primary" />
+            <h1 className="text-2xl font-display font-bold">Join Event</h1>
           </div>
           <p className="text-gray-400 text-sm">Join the AI Coding Challenge</p>
         </div>
 
-        <div className="bg-trae-card border border-white/10 rounded-2xl p-6 shadow-xl backdrop-blur-md">
+        <div className="bg-theme-card border border-white/10 rounded-2xl p-6 shadow-xl backdrop-blur-md">
           {status === 'connecting' && (
             <div className="flex flex-col items-center py-8 space-y-4">
-              <Loader2 className="w-8 h-8 text-trae-blue animate-spin" />
+              <Loader2 className="w-8 h-8 text-theme-secondary animate-spin" />
               <p className="text-gray-400">Connecting to host... / 连接中...</p>
               {errorMsg && <p className="text-xs text-yellow-400 animate-pulse">{errorMsg}</p>}
             </div>
@@ -330,7 +335,7 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-trae-purple focus:border-transparent transition-all"
+                  className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-theme-primary focus:border-transparent transition-all"
                   placeholder="Enter name (e.g. Alice)"
                   autoFocus
                   required
@@ -339,7 +344,7 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
               <button
                 type="submit"
                 disabled={status === 'submitting' || !name.trim()}
-                className="w-full py-4 rounded-xl bg-gradient-to-r from-trae-purple to-trae-blue text-white font-bold text-lg shadow-lg hover:shadow-trae-purple/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                className="w-full py-4 rounded-xl bg-gradient-to-r from-theme-primary to-theme-secondary text-white font-bold text-lg shadow-lg hover:shadow-theme-primary/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
               >
                 {status === 'submitting' ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
                 {status === 'submitting' ? 'Sending...' : 'Join / 加入'}
@@ -389,7 +394,7 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
               <div className="flex items-center gap-4 mb-3">
                   <button 
                     onClick={() => setActiveChannelId('lobby')}
-                    className={`flex items-center gap-2 text-sm font-medium pb-1 border-b-2 transition-colors ${activeChannelId === 'lobby' ? 'text-white border-trae-blue' : 'text-gray-500 border-transparent hover:text-gray-300'}`}
+                    className={`flex items-center gap-2 text-sm font-medium pb-1 border-b-2 transition-colors ${activeChannelId === 'lobby' ? 'text-white border-theme-secondary' : 'text-gray-500 border-transparent hover:text-gray-300'}`}
                   >
                       <MessageSquare className="w-4 h-4" />
                       Lobby
@@ -397,7 +402,7 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
                   {myTeam && (
                       <button 
                         onClick={() => setActiveChannelId(myTeam.id)}
-                        className={`flex items-center gap-2 text-sm font-medium pb-1 border-b-2 transition-colors ${activeChannelId === myTeam.id ? 'text-trae-purple border-trae-purple' : 'text-gray-500 border-transparent hover:text-gray-300'}`}
+                        className={`flex items-center gap-2 text-sm font-medium pb-1 border-b-2 transition-colors ${activeChannelId === myTeam.id ? 'text-theme-primary border-theme-primary' : 'text-gray-500 border-transparent hover:text-gray-300'}`}
                       >
                           <Users className="w-4 h-4" />
                           {myTeam.name}
@@ -408,7 +413,7 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
               <div className="bg-black/20 rounded-xl border border-white/5 overflow-hidden relative">
                 {/* Team Motto Banner */}
                 {activeChannelId !== 'lobby' && myTeam && (
-                    <div className="absolute top-0 left-0 right-0 bg-trae-purple/10 p-1.5 text-[10px] text-center text-trae-purple font-mono border-b border-trae-purple/20 backdrop-blur-sm z-10">
+                    <div className="absolute top-0 left-0 right-0 bg-theme-primary/10 p-1.5 text-[10px] text-center text-theme-primary font-mono border-b border-theme-primary/20 backdrop-blur-sm z-10">
                         "{myTeam.motto}"
                     </div>
                 )}
@@ -422,7 +427,7 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
                         {activeChannelId === 'lobby' ? (
                             <p className="text-xs text-gray-600">Say hello to the host!<br/>跟大家打个招呼吧！</p>
                         ) : (
-                            <p className="text-xs text-trae-purple/70">Start collaborating!<br/>开始协作吧！</p>
+                            <p className="text-xs text-theme-primary/70">Start collaborating!<br/>开始协作吧！</p>
                         )}
                     </div>
                   )}
@@ -440,9 +445,9 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
                         <div key={msg.id} className={`flex flex-col ${msg.sender === (name || 'Guest') ? 'items-end' : 'items-start'}`}>
                         <div className={`max-w-[85%] px-3 py-2 rounded-lg text-sm shadow-sm leading-relaxed ${
                             msg.isHost 
-                            ? 'bg-trae-purple text-white rounded-bl-none border border-trae-purple'
+                            ? 'bg-theme-primary text-white rounded-bl-none border border-theme-primary'
                             : msg.sender === (name || 'Guest')
-                                ? 'bg-trae-blue text-white rounded-br-none'
+                                ? 'bg-theme-secondary text-white rounded-br-none'
                                 : 'bg-gray-700 text-gray-200 rounded-bl-none'
                         }`}>
                             {msg.text}
@@ -461,7 +466,7 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                     placeholder={`Message ${activeChannelId === 'lobby' ? 'everyone' : 'team'}...`}
-                    className="flex-1 bg-black/40 border-none rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-trae-blue"
+                    className="flex-1 bg-black/40 border-none rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-theme-secondary"
                   />
                   <button 
                     type="submit" 
@@ -478,7 +483,7 @@ const JoinScreen: React.FC<JoinScreenProps> = ({ hostId }) => {
         </div>
         
         <div className="text-center text-xs text-gray-600">
-          Powered by Trae AI Matchmaker
+          Powered by Team Matchmaker
         </div>
       </div>
     </div>

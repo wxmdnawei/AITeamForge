@@ -51,13 +51,13 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({
 
   const TypingIndicator = () => (
     <div className="flex flex-col items-end animate-fade-in">
-      <div className="bg-gradient-to-br from-trae-purple/80 to-trae-accent/80 text-white rounded-xl rounded-br-none px-3 py-2 text-xs shadow-sm border border-white/10 flex items-center gap-1">
+      <div className="bg-gradient-to-br from-theme-primary/80 to-theme-accent/80 text-white rounded-xl rounded-br-none px-3 py-2 text-xs shadow-sm border border-white/10 flex items-center gap-1">
         <div className="w-1.5 h-1.5 bg-white rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
         <div className="w-1.5 h-1.5 bg-white rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
         <div className="w-1.5 h-1.5 bg-white rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
       </div>
       <span className="text-[10px] text-gray-500 mt-0.5 px-1 flex items-center gap-1">
-         <Sparkles className="w-2 h-2 text-trae-accent" />
+         <Sparkles className="w-2 h-2 text-theme-accent" />
          AI Host is typing...
       </span>
     </div>
@@ -69,14 +69,14 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({
       <div className="flex flex-col h-[320px] bg-white/5 rounded-lg border border-white/5 overflow-hidden">
         <div className="p-2 border-b border-white/5 bg-white/5 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <MessageSquare className="w-4 h-4 text-trae-blue" />
+            <MessageSquare className="w-4 h-4 text-theme-secondary" />
             <span className="text-xs font-medium text-gray-300">Live Chat / 实时互动</span>
           </div>
           <button
             onClick={onToggleAi}
             className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] border transition-all ${
               isAiEnabled 
-                ? 'bg-trae-purple/20 border-trae-purple text-trae-purple shadow-[0_0_10px_rgba(124,58,237,0.3)]' 
+                ? 'bg-theme-primary/20 border-theme-primary text-theme-primary shadow-[0_0_10px_rgba(var(--theme-primary),0.3)]' 
                 : 'bg-white/5 border-white/10 text-gray-500 hover:text-gray-300'
             }`}
             title="Enable AI Auto-Reply"
@@ -107,15 +107,15 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({
                 <div key={msg.id} className={`flex flex-col ${msg.isHost || msg.isAi ? 'items-end' : 'items-start'}`}>
                 <div className={`max-w-[85%] px-3 py-2 rounded-lg text-xs shadow-sm whitespace-pre-wrap leading-relaxed ${
                     msg.isAi
-                    ? 'bg-gradient-to-br from-trae-purple/80 to-trae-accent/80 text-white rounded-br-none border border-white/10'
+                    ? 'bg-gradient-to-br from-theme-primary/80 to-theme-accent/80 text-white rounded-br-none border border-white/10'
                     : msg.isHost 
-                        ? 'bg-trae-purple text-white rounded-br-none' 
+                        ? 'bg-theme-primary text-white rounded-br-none' 
                         : 'bg-gray-700 text-gray-200 rounded-bl-none'
                 }`}>
                     {msg.text}
                 </div>
                 <span className="text-[10px] text-gray-500 mt-0.5 px-1 flex items-center gap-1">
-                    {msg.isAi && <Sparkles className="w-2 h-2 text-trae-accent" />}
+                    {msg.isAi && <Sparkles className="w-2 h-2 text-theme-accent" />}
                     {msg.sender}
                 </span>
                 </div>
@@ -130,12 +130,12 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Send message as Host..."
-            className="flex-1 bg-black/20 border-none rounded px-2 py-1.5 text-xs text-white focus:ring-1 focus:ring-trae-blue placeholder-gray-600"
+            className="flex-1 bg-black/20 border-none rounded px-2 py-1.5 text-xs text-white focus:ring-1 focus:ring-theme-secondary placeholder-gray-600"
           />
           <button 
             type="submit" 
             disabled={!input.trim()}
-            className="p-1.5 bg-trae-blue text-white rounded hover:bg-trae-blue/80 disabled:opacity-50 transition-colors"
+            className="p-1.5 bg-theme-secondary text-white rounded hover:bg-theme-secondary/80 disabled:opacity-50 transition-colors"
           >
             <Send className="w-3 h-3" />
           </button>
@@ -165,7 +165,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({
                     <button
                     onClick={onToggleAi}
                     className={`p-1.5 rounded-md transition-colors ${
-                        isAiEnabled ? 'bg-trae-purple/20 text-trae-purple' : 'text-gray-500 hover:text-gray-300'
+                        isAiEnabled ? 'bg-theme-primary/20 text-theme-primary' : 'text-gray-500 hover:text-gray-300'
                     }`}
                     title="Toggle AI Host"
                     >
@@ -196,7 +196,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({
                             onClick={() => setActiveChannelId(team.id)}
                             className={`px-2 py-1 rounded text-[10px] whitespace-nowrap transition-colors flex items-center gap-1 ${
                                 activeChannelId === team.id
-                                ? 'bg-trae-purple text-white font-bold' 
+                                ? 'bg-theme-primary text-white font-bold' 
                                 : 'bg-white/5 text-gray-400 hover:text-white'
                             }`}
                         >
@@ -230,15 +230,15 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({
                 <div key={msg.id} className={`flex flex-col ${msg.isHost || msg.isAi ? 'items-end' : 'items-start'}`}>
                 <div className={`max-w-[90%] px-3 py-2 rounded-xl text-xs shadow-sm whitespace-pre-wrap leading-relaxed ${
                     msg.isAi
-                    ? 'bg-gradient-to-r from-trae-purple to-trae-accent text-white rounded-br-none'
+                    ? 'bg-gradient-to-r from-theme-primary to-theme-accent text-white rounded-br-none'
                     : msg.isHost 
-                        ? 'bg-trae-purple text-white rounded-br-none' 
+                        ? 'bg-theme-primary text-white rounded-br-none' 
                         : 'bg-white/10 text-gray-200 rounded-bl-none'
                 }`}>
                     {msg.text}
                 </div>
                 <span className="text-[10px] text-gray-500 mt-1 px-1 flex items-center gap-1">
-                    {msg.isAi && <Sparkles className="w-2 h-2 text-trae-accent" />}
+                    {msg.isAi && <Sparkles className="w-2 h-2 text-theme-accent" />}
                     {msg.sender}
                 </span>
                 </div>
@@ -262,12 +262,12 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder={`Message ${activeChannelId === 'lobby' ? 'everyone' : 'team'}...`}
-                className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:ring-1 focus:ring-trae-purple outline-none"
+                className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:ring-1 focus:ring-theme-primary outline-none"
             />
             <button 
                 type="submit" 
                 disabled={!input.trim()}
-                className="p-2 bg-trae-purple text-white rounded-lg hover:bg-trae-purple/80 disabled:opacity-50 transition-colors"
+                className="p-2 bg-theme-primary text-white rounded-lg hover:bg-theme-primary/80 disabled:opacity-50 transition-colors"
             >
                 <Send className="w-4 h-4" />
             </button>
@@ -280,7 +280,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({
         onClick={() => setIsOpen(!isOpen)}
         className={`
           pointer-events-auto w-12 h-12 rounded-full shadow-xl flex items-center justify-center transition-all duration-300 hover:scale-110
-          ${isOpen ? 'bg-white/10 text-white rotate-90' : 'bg-gradient-to-r from-trae-purple to-trae-blue text-white'}
+          ${isOpen ? 'bg-white/10 text-white rotate-90' : 'bg-gradient-to-r from-theme-primary to-theme-secondary text-white'}
         `}
       >
         {isOpen ? <X className="w-5 h-5" /> : <MessageSquare className="w-5 h-5" />}

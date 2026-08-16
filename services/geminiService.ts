@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type, Modality } from "@google/genai";
-import { GeneratedTeamMetadata, Team, TaskItem } from "../types";
+import { GeneratedTeamMetadata, Team, TaskItem, TeamAnalysis, Participant } from "../types";
 
 // Robust UUID Generator (replaces 'uuid' library to prevent load errors)
 export const generateUUID = (): string => {
@@ -46,6 +46,24 @@ const FALLBACK_ICEBREAKER_ZH = "你最喜欢的编程语言是什么？为什么
 const FALLBACK_TOPIC = "Build a Personal Task Manager";
 const FALLBACK_TOPIC_ZH = "开发一个个人任务管理工具";
 
+// Event Presets for Random Initialization
+const EVENT_PRESETS = [
+  { name: "AI Code Challenge", theme: "Assemble your squad for the AI coding challenge." },
+  { name: "Cyberpunk Night", theme: "High tech, low life, neon dreams." },
+  { name: "Neural Nexus 2024", theme: "Connecting minds and machines." },
+  { name: "Code & Coffee Jam", theme: "Caffeine fueled innovation sprint." },
+  { name: "Future Stack Summit", theme: "Building tomorrow's tools, today." },
+  { name: "Offline Match", theme: "Find your perfect coding soulmate." },
+  { name: "Deep Dive Hackathon", theme: "Exploring the depths of Generative AI." },
+  { name: "Pixel Perfect Bash", theme: "Where design meets algorithm." },
+  { name: "Quantum Leap Quest", theme: "Solving problems before they exist." },
+  { name: "Midnight Makers", theme: "Building while the world sleeps." }
+];
+
+export const getRandomEventPreset = () => {
+  return EVENT_PRESETS[Math.floor(Math.random() * EVENT_PRESETS.length)];
+};
+
 const getRandomElement = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
 
 // Helper: Retry Logic with Exponential Backoff
@@ -62,12 +80,34 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 1000): Pr
 
 // Helper: Clean JSON Markdown
 const cleanJson = (text: string) => {
-  return text.replace(/```json\n?|\n?```/g, '').trim();
+  // 1. Remove Markdown code blocks
+  let clean = text.replace(/```json\n?|```/g, '').trim();
+  
+  // 2. Attempt to find JSON structure if there's conversational text
+  const firstBrace = clean.indexOf('{');
+  const firstBracket = clean.indexOf('[');
+  
+  if (firstBrace === -1 && firstBracket === -1) return clean;
+  
+  const start = (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) 
+    ? firstBrace 
+    : firstBracket;
+    
+  const lastBrace = clean.lastIndexOf('}');
+  const lastBracket = clean.lastIndexOf(']');
+  
+  const end = Math.max(lastBrace, lastBracket);
+  
+  if (end > start) {
+    clean = clean.substring(start, end + 1);
+  }
+  
+  return clean;
 };
 
 export const enrichTeamsWithGemini = async (
   teams: Team[],
-  eventName: string = 'Trae AI Challenge',
+  eventName: string = 'AI Code Challenge',
   eventTheme: string = 'AI coding hackathon'
 ): Promise<Team[]> => {
   if (!apiKey) {
@@ -89,44 +129,30 @@ export const enrichTeamsWithGemini = async (
   try {
     const ai = new GoogleGenAI({ apiKey });
 
-    // We include existing topics in the payload so Gemini knows about them
+    // Streamlined payload to reduce request size
     const teamsPayload = teams.map(t => ({
       id: t.id,
-      memberCount: t.members.length,
-      memberNames: t.members.map(m => m.name),
-      existingTopic: t.topic, // Pass existing topic
-      existingTopicZh: t.topicZh
+      names: t.members.map(m => m.name),
+      topic: t.topic, // Pass existing topic if any
+      topicZh: t.topicZh
     }));
+
+    const systemInstruction = `You are an Event Organizer Bot for '${eventName}' (${eventTheme}).
+    Generate creative, cool, and relevant team identities for the provided teams.
+    
+    RULES:
+    1. If a team has 'topic' in input, you MUST use it. Do NOT change it. Use it to inspire the team name.
+    2. If 'topic' is missing, generate a unique, specific project task relevant to '${eventTheme}'.
+       - Example: "AI Trash Sorter" (Specific) vs "Environment" (Too broad).
+    3. Output fields: name, nameZh, motto, mottoZh, icebreaker, icebreakerZh, mascotEmoji, topic, topicZh.
+    4. Return pure JSON array matching the schema.`;
 
     return await withRetry(async () => {
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: `I have organized an event called '${eventName}'. 
-        The theme or context of the event is: '${eventTheme}'.
-        I have divided participants into the following teams: ${JSON.stringify(teamsPayload)}.
-        
-        For EACH team, I need you to generate a creative, cool, and relevant identity based on the event theme in BOTH English and Chinese.
-        
-        IMPORTANT RULES:
-        1. If a team already has an 'existingTopic' provided in the input, you MUST use that topic for their 'topic' and 'topicZh' fields. Do NOT change it. Use that topic to inspire the team name and motto.
-        2. If 'existingTopic' is missing, you MUST generate a unique, specific, and creative project task/challenge for 'topic' and 'topicZh'.
-           - The generated task MUST be deeply relevant to the event theme: "${eventTheme}".
-           - It should be a concrete project idea (e.g., "AI-powered Trash Sorter" instead of just "Environment").
-           - Ensure the Chinese translation 'topicZh' is natural and accurate.
-        
-        Fields required:
-        1. name: A cool team name.
-        2. nameZh: Chinese team name.
-        3. motto: English motto.
-        4. mottoZh: Chinese motto.
-        5. icebreaker: Fun question for teammates.
-        6. icebreakerZh: Chinese icebreaker.
-        7. mascotEmoji: Single emoji.
-        8. topic: The project challenge/task.
-        9. topicZh: Chinese topic.
-        
-        Return the data as a JSON array matching the schema.`,
+        contents: `Process these teams: ${JSON.stringify(teamsPayload)}`,
         config: {
+          systemInstruction: systemInstruction,
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.ARRAY,
@@ -150,7 +176,8 @@ export const enrichTeamsWithGemini = async (
         }
       });
 
-      const generatedData = JSON.parse(response.text || '[]') as GeneratedTeamMetadata[];
+      const cleanText = cleanJson(response.text || '[]');
+      const generatedData = JSON.parse(cleanText) as GeneratedTeamMetadata[];
 
       // Merge generated data back into the original teams
       return teams.map(originalTeam => {
@@ -175,6 +202,7 @@ export const enrichTeamsWithGemini = async (
 
   } catch (error) {
     console.error("Gemini API Error (enrichTeams):", error);
+    // Fallback logic
     return teams.map(t => ({
       ...t,
       name: `Team ${t.id.slice(0, 4)}`,
@@ -200,7 +228,7 @@ export const generateThemeSuggestions = async (eventName: string): Promise<strin
         contents: `Generate 5 creative event themes for "${eventName}". Return JSON array of strings.`,
         config: { responseMimeType: "application/json", responseSchema: { type: Type.ARRAY, items: { type: Type.STRING } } }
       });
-      return JSON.parse(response.text || '[]');
+      return JSON.parse(cleanJson(response.text || '[]'));
     });
   } catch (e) { return []; }
 };
@@ -211,8 +239,7 @@ export const generateTaskLibrarySuggestions = async (eventName: string, eventThe
     const ai = new GoogleGenAI({ apiKey });
     
     return await withRetry(async () => {
-      // Using raw text generation with JSON prompt is often more robust against "xhr error" 500s 
-      // than strict schema validation for simple lists.
+      // Use application/json responseMimeType for robust parsing
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
         contents: `Generate 5 specific, creative, and distinct project tasks or challenges for an event named "${eventName}" with theme "${eventTheme}".
@@ -222,11 +249,13 @@ export const generateTaskLibrarySuggestions = async (eventName: string, eventThe
         - title: The task title in English.
         - titleZh: The task title in Chinese.
         
-        Do not include any other text.
         Example output:
         [
           { "title": "AI Trash Sorter", "titleZh": "AI 垃圾分类器" }
         ]`,
+        config: {
+            responseMimeType: "application/json"
+        }
       });
 
       const cleanText = cleanJson(response.text || '[]');
@@ -333,6 +362,141 @@ export const generateTeamPoster = async (team: Team, eventName: string, eventThe
   } catch (e) {
     console.error("Poster gen error", e);
     return undefined;
+  }
+};
+
+export const generateTeamAvatar = async (team: Team, eventName: string, eventTheme: string): Promise<string | undefined> => {
+  if (!apiKey) return undefined;
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    const prompt = `Design a high-quality, distinctive team avatar icon.
+    Team Name: "${team.name}" (${team.nameZh || ''}).
+    Event Theme: "${eventTheme}".
+    Style: 3D Render, colorful, icon-style, minimalist background. 
+    Subject: A central character or object representing the team name '${team.name}'.
+    IMPORTANT: NO TEXT. NO WORDS. Just the visual symbol.`;
+
+    const response = await withRetry(async () => {
+        return await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [{ text: prompt }] },
+        });
+    });
+
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+        if (part.inlineData) {
+            return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+        }
+    }
+    return undefined;
+  } catch (e) {
+    console.error("Avatar gen error", e);
+    return undefined;
+  }
+};
+
+export const analyzeTeamStrength = async (team: Team, eventName: string, eventTheme: string): Promise<TeamAnalysis | null> => {
+  if (!apiKey) return null;
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    
+    const analysisPrompt = `
+      Act as an expert AI Hackathon Judge and HR Specialist.
+      Analyze the following team for the event: "${eventName}" (Theme: "${eventTheme}").
+      
+      Team Name: ${team.name}
+      Motto: ${team.motto}
+      Assigned Task: ${team.topic || 'General Participation'}
+      Members: ${team.members.map(m => m.name).join(', ')}
+      
+      Evaluate their "Win Rate" (Success Probability) based on the synergy of their identity, the relevance of their task to the theme, and the implicit diversity of the team composition. Use scientific algorithmic reasoning to determine the scores.
+      
+      Score them (0-100) on these dimensions:
+      1. Innovation (Is the task/identity creative?)
+      2. Technical (How difficult/feasible is the task?)
+      3. Chemistry (Do the names/vibes suggest good teamwork? - be creative/optimistic)
+      4. Presentation (How cool is their branding?)
+      
+      Provide a brief 1-sentence comment and 2 short suggestions for improvement.
+    `;
+
+    return await withRetry(async () => {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-pro-preview", // Using Pro for complex reasoning and analysis
+        contents: analysisPrompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              winRate: { type: Type.INTEGER, description: "Success probability 0-100" },
+              overallScore: { type: Type.INTEGER, description: "Total score 0-100" },
+              dimensions: {
+                type: Type.OBJECT,
+                properties: {
+                  innovation: { type: Type.INTEGER },
+                  technical: { type: Type.INTEGER },
+                  chemistry: { type: Type.INTEGER },
+                  presentation: { type: Type.INTEGER },
+                },
+                required: ["innovation", "technical", "chemistry", "presentation"]
+              },
+              comment: { type: Type.STRING },
+              suggestions: { type: Type.ARRAY, items: { type: Type.STRING } }
+            },
+            required: ["winRate", "overallScore", "dimensions", "comment", "suggestions"]
+          }
+        }
+      });
+      return JSON.parse(cleanJson(response.text || 'null')) as TeamAnalysis;
+    });
+  } catch (e) {
+    console.error("Analysis error", e);
+    return null;
+  }
+};
+
+export const evaluateParticipant = async (participant: Participant, eventTheme: string, teamTask?: string): Promise<Participant['evaluation'] | null> => {
+  if (!apiKey || !participant.bio) return null;
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    const taskContext = teamTask ? `Assigned Team Task: "${teamTask}"` : "";
+    
+    return await withRetry(async () => {
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash", // Switch to Flash for robust response handling
+        contents: `Act as a Technical Recruiter and Project Manager.
+        Event Theme: "${eventTheme}".
+        ${taskContext}
+        
+        Evaluate this participant based on their profile:
+        Name: ${participant.name}
+        Profile/Resume: "${participant.bio}"
+        
+        Calculate a "Quality Score" (0-100) representing their fit for this event/task.
+        Provide a 1-sentence reason and list 3 key skill tags extracted from their bio.
+        
+        Return strict JSON format.`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              score: { type: Type.INTEGER },
+              reason: { type: Type.STRING },
+              tags: { type: Type.ARRAY, items: { type: Type.STRING } }
+            },
+            required: ["score", "reason", "tags"]
+          }
+        }
+      });
+      
+      const cleanText = cleanJson(response.text || '{}');
+      return JSON.parse(cleanText);
+    });
+  } catch (e) {
+    console.error("Member evaluation error", e);
+    return null;
   }
 };
 

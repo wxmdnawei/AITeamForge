@@ -1,5 +1,8 @@
 {
-  "name": "Trae Matchmaker",
-  "description": "An AI-powered team matching application for the Trae offline coding challenge. Groups participants and generates creative team identities.",
-  "requestFramePermissions": []
+  "name": "Team Matchmaker",
+  "description": "An AI-powered team matching application for offline coding challenges. Groups participants and generates creative team identities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

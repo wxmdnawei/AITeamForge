@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Users, History, Trash2, QrCode, ChevronDown, ChevronUp, Link, Loader2, Settings2, Sparkles, X, Plus, Target } from 'lucide-react';
 import { generateThemeSuggestions, generateTaskLibrarySuggestions } from '../services/geminiService';
@@ -29,7 +28,18 @@ interface ParticipantInputProps {
   // Task Library Props
   taskLibrary: TaskItem[];
   setTaskLibrary: (val: TaskItem[] | ((prev: TaskItem[]) => TaskItem[])) => void;
+  // Theme Props
+  currentTheme: string;
+  setCurrentTheme: (theme: string) => void;
 }
+
+const THEMES = [
+  { id: 'default', name: 'Default', color: 'bg-[#6366f1]' }, // Indigo
+  { id: 'cyberpunk', name: 'Cyber', color: 'bg-[#FACC15]' },
+  { id: 'ocean', name: 'Ocean', color: 'bg-[#0EA5E9]' },
+  { id: 'forest', name: 'Forest', color: 'bg-[#10B981]' },
+  { id: 'sunset', name: 'Sunset', color: 'bg-[#F97316]' },
+];
 
 const ParticipantInput: React.FC<ParticipantInputProps> = ({
   rawInput,
@@ -52,7 +62,9 @@ const ParticipantInput: React.FC<ParticipantInputProps> = ({
   onToggleAiChat,
   isAiTyping = false,
   taskLibrary,
-  setTaskLibrary
+  setTaskLibrary,
+  currentTheme,
+  setCurrentTheme
 }) => {
   const [isQrOpen, setIsQrOpen] = useState(false);
   
@@ -136,11 +148,11 @@ const ParticipantInput: React.FC<ParticipantInputProps> = ({
     <div className="w-full max-w-5xl mx-auto space-y-8 animate-fade-in-up">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Name Input Area */}
-        <div className="lg:col-span-2 bg-trae-card border border-white/10 rounded-2xl p-6 shadow-xl backdrop-blur-sm flex flex-col">
+        <div className="lg:col-span-2 bg-theme-card border border-white/10 rounded-2xl p-6 shadow-xl backdrop-blur-sm flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-xl font-display font-semibold text-white flex items-center gap-2">
-                <Users className="w-5 h-5 text-trae-blue" />
+                <Users className="w-5 h-5 text-theme-secondary" />
                 Participant List
               </h2>
               <p className="text-xs text-gray-500 font-sans mt-0.5 ml-7">参赛名单</p>
@@ -149,7 +161,7 @@ const ParticipantInput: React.FC<ParticipantInputProps> = ({
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setIsQrOpen(!isQrOpen)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${isQrOpen ? 'bg-trae-purple text-white' : 'bg-white/5 text-gray-400 hover:text-white'}`}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${isQrOpen ? 'bg-theme-primary text-white' : 'bg-white/5 text-gray-400 hover:text-white'}`}
               >
                 <QrCode className="w-4 h-4" />
                 <span>Live Join / 扫码加入</span>
@@ -180,7 +192,7 @@ const ParticipantInput: React.FC<ParticipantInputProps> = ({
                        {peerError}
                     </p>
                   )}
-                  <button onClick={copyLink} className="text-xs text-trae-purple hover:text-trae-accent underline flex items-center gap-1">
+                  <button onClick={copyLink} className="text-xs text-theme-primary hover:text-theme-accent underline flex items-center gap-1">
                     <Link className="w-3 h-3" /> Copy Direct Link / 复制链接
                   </button>
                 </div>
@@ -194,7 +206,7 @@ const ParticipantInput: React.FC<ParticipantInputProps> = ({
                     />
                   ) : (
                     <div className="w-full h-full flex flex-col items-center justify-center text-gray-300">
-                      <Loader2 className="w-8 h-8 mb-2 animate-spin text-trae-purple" />
+                      <Loader2 className="w-8 h-8 mb-2 animate-spin text-theme-primary" />
                       <span className="text-[10px] text-gray-400 text-center">Init...</span>
                     </div>
                   )}
@@ -218,15 +230,15 @@ const ParticipantInput: React.FC<ParticipantInputProps> = ({
             value={rawInput}
             onChange={(e) => setRawInput(e.target.value)}
             placeholder="Paste names here, one per line... or scan QR code to add.&#10;此处粘贴名单，每行一个名字... 或扫码自动添加。&#10;Alice&#10;Bob&#10;Charlie"
-            className="w-full flex-grow min-h-[300px] bg-black/40 border border-white/10 rounded-xl p-4 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-trae-purple focus:border-transparent resize-none font-mono text-sm leading-relaxed transition-all"
+            className="w-full flex-grow min-h-[300px] bg-black/40 border border-white/10 rounded-xl p-4 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-theme-primary focus:border-transparent resize-none font-mono text-sm leading-relaxed transition-all"
           />
         </div>
 
         {/* Configuration Panel */}
         <div className="space-y-6">
-          <div className="bg-trae-card border border-white/10 rounded-2xl p-6 shadow-xl">
+          <div className="bg-theme-card border border-white/10 rounded-2xl p-6 shadow-xl">
             <div className="mb-4 flex items-center gap-2">
-              <Settings2 className="w-5 h-5 text-trae-accent" />
+              <Settings2 className="w-5 h-5 text-theme-accent" />
               <div>
                 <h2 className="text-xl font-display font-semibold text-white">Settings</h2>
                 <p className="text-xs text-gray-500">活动设置</p>
@@ -241,8 +253,8 @@ const ParticipantInput: React.FC<ParticipantInputProps> = ({
                   type="text"
                   value={eventName}
                   onChange={(e) => setEventName(e.target.value)}
-                  className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-trae-purple focus:ring-1 focus:ring-trae-purple focus:outline-none"
-                  placeholder="e.g. Trae AI Challenge"
+                  className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-theme-primary focus:ring-1 focus:ring-theme-primary focus:outline-none"
+                  placeholder="e.g. AI Hackathon"
                 />
               </div>
 
@@ -252,7 +264,7 @@ const ParticipantInput: React.FC<ParticipantInputProps> = ({
                   <button 
                     onClick={handleSuggestThemes}
                     disabled={isGeneratingThemes}
-                    className="text-[10px] flex items-center gap-1 text-trae-purple hover:text-trae-accent disabled:opacity-50 transition-colors mb-1"
+                    className="text-[10px] flex items-center gap-1 text-theme-primary hover:text-theme-accent disabled:opacity-50 transition-colors mb-1"
                   >
                     {isGeneratingThemes ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
                     Suggest Theme
@@ -262,7 +274,7 @@ const ParticipantInput: React.FC<ParticipantInputProps> = ({
                   type="text"
                   value={eventTheme}
                   onChange={(e) => setEventTheme(e.target.value)}
-                  className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-trae-purple focus:ring-1 focus:ring-trae-purple focus:outline-none"
+                  className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-theme-primary focus:ring-1 focus:ring-theme-primary focus:outline-none"
                   placeholder="e.g. AI Hackathon, Board Game Night..."
                 />
                 
@@ -278,7 +290,7 @@ const ParticipantInput: React.FC<ParticipantInputProps> = ({
                         <button
                           key={idx}
                           onClick={() => handleSelectTheme(theme)}
-                          className="text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded-full px-3 py-1.5 text-gray-300 hover:text-white hover:border-trae-purple/50 transition-all text-left"
+                          className="text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded-full px-3 py-1.5 text-gray-300 hover:text-white hover:border-theme-primary/50 transition-all text-left"
                         >
                           {theme}
                         </button>
@@ -286,6 +298,23 @@ const ParticipantInput: React.FC<ParticipantInputProps> = ({
                     </div>
                   </div>
                 )}
+              </div>
+
+              <div className="w-full h-px bg-white/5 my-2"></div>
+
+              {/* Theme Selector */}
+              <div className="space-y-1">
+                 <label className="block text-xs uppercase tracking-wider text-gray-500 font-semibold">Color Theme / 界面主题</label>
+                 <div className="flex gap-2.5">
+                    {THEMES.map(t => (
+                        <button
+                          key={t.id}
+                          onClick={() => setCurrentTheme(t.id)}
+                          className={`w-8 h-8 rounded-full ${t.color} transition-transform hover:scale-110 shadow-lg ${currentTheme === t.id ? 'ring-2 ring-white ring-offset-2 ring-offset-[#18181B] scale-110' : 'opacity-70 hover:opacity-100'}`}
+                          title={t.name}
+                        />
+                    ))}
+                 </div>
               </div>
 
               <div className="w-full h-px bg-white/5 my-2"></div>
@@ -299,7 +328,7 @@ const ParticipantInput: React.FC<ParticipantInputProps> = ({
                      <button 
                         onClick={handleGenerateTasks}
                         disabled={isGeneratingTasks}
-                        className="text-[10px] flex items-center gap-1 text-trae-blue hover:text-white disabled:opacity-50 transition-colors"
+                        className="text-[10px] flex items-center gap-1 text-theme-secondary hover:text-white disabled:opacity-50 transition-colors"
                      >
                          {isGeneratingTasks ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
                          Auto-Fill
@@ -314,7 +343,7 @@ const ParticipantInput: React.FC<ParticipantInputProps> = ({
                              value={newTaskTitle}
                              onChange={(e) => setNewTaskTitle(e.target.value)}
                              placeholder="Task Title (EN)"
-                             className="w-full bg-white/5 border border-white/5 rounded px-2 py-1.5 text-xs text-white focus:ring-1 focus:ring-trae-blue outline-none"
+                             className="w-full bg-white/5 border border-white/5 rounded px-2 py-1.5 text-xs text-white focus:ring-1 focus:ring-theme-secondary outline-none"
                          />
                          <div className="flex gap-2">
                              <input 
@@ -322,7 +351,7 @@ const ParticipantInput: React.FC<ParticipantInputProps> = ({
                                  value={newTaskTitleZh}
                                  onChange={(e) => setNewTaskTitleZh(e.target.value)}
                                  placeholder="Task Title (CN)"
-                                 className="flex-1 bg-white/5 border border-white/5 rounded px-2 py-1.5 text-xs text-white focus:ring-1 focus:ring-trae-blue outline-none"
+                                 className="flex-1 bg-white/5 border border-white/5 rounded px-2 py-1.5 text-xs text-white focus:ring-1 focus:ring-theme-secondary outline-none"
                              />
                              <button 
                                  onClick={handleAddTask}
@@ -397,7 +426,7 @@ const ParticipantInput: React.FC<ParticipantInputProps> = ({
                 w-full py-4 rounded-2xl font-display font-bold text-lg tracking-wide shadow-lg transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98]
                 ${participantCount < 2 
                   ? 'bg-gray-800 text-gray-500 cursor-not-allowed border border-white/5' 
-                  : 'bg-gradient-to-r from-trae-purple to-trae-blue text-white hover:shadow-trae-purple/50 border border-transparent'}
+                  : 'bg-gradient-to-r from-theme-primary to-theme-secondary text-white hover:shadow-theme-primary/50 border border-transparent'}
               `}
             >
               <div className="flex flex-col items-center leading-tight">
@@ -410,7 +439,7 @@ const ParticipantInput: React.FC<ParticipantInputProps> = ({
               onClick={onOpenHistory}
               className="w-full py-3 rounded-xl font-display font-medium text-sm tracking-wide border border-white/10 bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white transition-colors flex items-center justify-center gap-2 group"
             >
-              <History className="w-4 h-4 group-hover:text-trae-purple transition-colors" />
+              <History className="w-4 h-4 group-hover:text-theme-primary transition-colors" />
               <span>Match History / 历史记录</span>
               {historyCount > 0 && (
                 <span className="px-2 py-0.5 rounded-full bg-white/10 text-xs font-bold text-gray-300 border border-white/5">

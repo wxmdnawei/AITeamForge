@@ -1,10 +1,9 @@
-
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Trae AI Team Matcher</title>
+    <title>Team Matchmaker</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <script type="importmap">
@@ -23,20 +22,6 @@
 }
 </script>
     <script>
-      // Critical Polyfills: Must run before any modules load
-      window.global = window;
-      window.process = {
-        env: { NODE_ENV: 'production' },
-        nextTick: function(cb) { setTimeout(cb, 0); },
-        browser: true,
-        version: ''
-      };
-      // Temporary Buffer placeholder to prevent early ReferenceErrors
-      if (typeof window.Buffer === 'undefined') {
-        window.Buffer = { isBuffer: () => false }; 
-      }
-    </script>
-    <script>
       tailwind.config = {
         theme: {
           extend: {
@@ -45,12 +30,12 @@
               display: ['Space Grotesk', 'sans-serif'],
             },
             colors: {
-              trae: {
+              theme: {
                 dark: '#0A0A0B',
                 card: '#18181B',
-                purple: '#7C3AED',
-                blue: '#3B82F6',
-                accent: '#F472B6'
+                primary: 'rgb(var(--theme-primary) / <alpha-value>)',
+                secondary: 'rgb(var(--theme-secondary) / <alpha-value>)',
+                accent: 'rgb(var(--theme-accent) / <alpha-value>)'
               }
             },
             animation: {
@@ -60,7 +45,39 @@
         },
       }
     </script>
+    
     <style>
+      :root {
+        /* Default (Indigo/Blue) */
+        --theme-primary: 99 102 241; /* Indigo-500 */
+        --theme-secondary: 6 182 212; /* Cyan-500 */
+        --theme-accent: 244 114 182; /* Pink-400 */
+      }
+      
+      [data-theme='cyberpunk'] {
+        --theme-primary: 250 204 21; /* Yellow-400 */
+        --theme-secondary: 34 211 238; /* Cyan-400 */
+        --theme-accent: 251 113 133; /* Rose-400 */
+      }
+
+      [data-theme='ocean'] {
+        --theme-primary: 14 165 233; /* Sky-500 */
+        --theme-secondary: 20 184 166; /* Teal-500 */
+        --theme-accent: 99 102 241; /* Indigo-500 */
+      }
+
+      [data-theme='forest'] {
+        --theme-primary: 16 185 129; /* Emerald-500 */
+        --theme-secondary: 132 204 22; /* Lime-500 */
+        --theme-accent: 234 179 8;  /* Yellow-500 */
+      }
+
+      [data-theme='sunset'] {
+        --theme-primary: 249 115 22; /* Orange-500 */
+        --theme-secondary: 239 68 68; /* Red-500 */
+        --theme-accent: 245 158 11; /* Amber-500 */
+      }
+
       body {
         background-color: #050505;
         color: #ffffff;
@@ -81,8 +98,37 @@
         background: #52525b; 
       }
     </style>
+
+    <!-- CRITICAL POLYFILLS (Synchronous) -->
+    <script>
+      // 1. Global Polyfill (Must run immediately for PeerJS/Util)
+      window.global = window;
+      window.globalThis = window;
+      
+      // 2. Process Polyfill
+      window.process = {
+        env: { NODE_ENV: 'production' },
+        nextTick: function(cb) { setTimeout(cb, 0); },
+        browser: true,
+        version: 'v16.0.0'
+      };
+      
+      console.log("Sync Polyfills initialized");
+    </script>
+
+    <!-- CRITICAL POLYFILLS (Module/Buffer) -->
+    <script type="module">
+      import { Buffer } from 'buffer';
+      
+      // 3. Buffer Polyfill
+      window.Buffer = Buffer;
+      
+      console.log("Buffer Polyfill initialized");
+    </script>
+<link rel="stylesheet" href="/index.css">
 </head>
   <body>
     <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
   </body>
 </html>

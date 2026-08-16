@@ -1,7 +1,6 @@
-
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { MatchingStatus, Participant, Team, ChatMessage, TaskItem, SavedMatch } from './types';
-import { enrichTeamsWithGemini, generateTeamAnnouncement, generateSingleTeamAnnouncement, generateAIChatResponse, generateAIProactiveMessage, generateUUID } from './services/geminiService';
+import { enrichTeamsWithGemini, generateTeamAnnouncement, generateSingleTeamAnnouncement, generateAIChatResponse, generateAIProactiveMessage, generateUUID, getRandomEventPreset } from './services/geminiService';
 import { PEER_CONFIG } from './services/peerConfig'; // Import Config
 import ParticipantInput from './components/ParticipantInput';
 import TeamCard from './components/TeamCard';
@@ -108,14 +107,20 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Initialize random preset state ONCE on mount
+  const [initialPreset] = useState(() => getRandomEventPreset());
+
   // --- App State ---
   const [rawInput, setRawInput] = useState<string>('');
   const [teamSize, setTeamSize] = useState<number>(3);
-  const [eventName, setEventName] = useState<string>('Trae AI Challenge');
-  const [eventTheme, setEventTheme] = useState<string>('Assemble your squad for the AI coding challenge.');
+  const [eventName, setEventName] = useState<string>(initialPreset.name);
+  const [eventTheme, setEventTheme] = useState<string>(initialPreset.theme);
   const [status, setStatus] = useState<MatchingStatus>('idle');
   const [teams, setTeams] = useState<Team[]>([]);
   
+  // Theme State
+  const [currentTheme, setCurrentTheme] = useState('default');
+
   // History State
   const [matchHistory, setMatchHistory] = useState<SavedMatch[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
@@ -164,7 +169,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (viewMode === 'app') {
       // 1. Load History (Global LocalStorage)
-      const savedHistory = safeLocalStorage.getItem('trae_match_history');
+      const savedHistory = safeLocalStorage.getItem('matchmaker_history');
       if (savedHistory) {
         try {
           setMatchHistory(JSON.parse(savedHistory));
@@ -175,7 +180,11 @@ const App: React.FC = () => {
 
       // 2. Load Active Session State (Isolated SessionStorage)
       try {
-        const sessionData = safeSessionStorage.getItem('trae_app_session');
+        const sessionData = safeSessionStorage.getItem('matchmaker_session');
+        const savedTheme = safeSessionStorage.getItem('matchmaker_theme');
+        
+        if (savedTheme) setCurrentTheme(savedTheme);
+
         if (sessionData) {
           const parsed = JSON.parse(sessionData);
           if (parsed.rawInput) setRawInput(parsed.rawInput);
@@ -193,6 +202,14 @@ const App: React.FC = () => {
     }
   }, [viewMode]);
 
+  // Apply Theme
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', currentTheme);
+    if (viewMode === 'app') {
+        safeSessionStorage.setItem('matchmaker_theme', currentTheme);
+    }
+  }, [currentTheme, viewMode]);
+
   // Persist Active State to SessionStorage
   useEffect(() => {
     if (viewMode === 'app') {
@@ -203,7 +220,7 @@ const App: React.FC = () => {
         teams,
         taskLibrary
       };
-      safeSessionStorage.setItem('trae_app_session', JSON.stringify(sessionData));
+      safeSessionStorage.setItem('matchmaker_session', JSON.stringify(sessionData));
     }
   }, [rawInput, eventName, eventTheme, teams, taskLibrary, viewMode]);
 
@@ -286,19 +303,24 @@ const App: React.FC = () => {
       peer.on('disconnected', () => {
         console.warn('PeerServer disconnected.');
         // IMPORTANT: Only reconnect if actually disconnected and not destroyed
-        if (peer && !peer.destroyed && peer.disconnected) {
-            console.log('Attempting to reconnect...');
-            peer.reconnect();
-        }
+        // Add a delay to prevent spamming reconnection attempts
+        setTimeout(() => {
+            if (peer && !peer.destroyed && peer.disconnected) {
+                console.log('Attempting to reconnect...');
+                peer.reconnect();
+            }
+        }, 2000);
       });
 
       peer.on('error', (err) => {
         // Suppress "Lost connection to server" console error spam
-        if (err.type === 'network' || err.message === 'Lost connection to server') {
+        if (err.type === 'network' || err.type === 'disconnected' || err.message?.includes('Lost connection')) {
              console.log('PeerJS network hiccup. Checking reconnection...');
-             if (peer && !peer.destroyed && peer.disconnected) {
-                 peer.reconnect();
-             }
+             setTimeout(() => {
+                 if (peer && !peer.destroyed && peer.disconnected) {
+                     peer.reconnect();
+                 }
+             }, 2000);
              return;
         }
         
@@ -437,7 +459,7 @@ const App: React.FC = () => {
   };
 
   const saveHistoryToStorage = (history: SavedMatch[]) => {
-    safeLocalStorage.setItem('trae_match_history', JSON.stringify(history));
+    safeLocalStorage.setItem('matchmaker_history', JSON.stringify(history));
   };
 
   const handleSaveToHistory = () => {
@@ -872,7 +894,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen text-white font-sans selection:bg-trae-purple selection:text-white pb-20 relative">
+    <div className="min-h-screen text-white font-sans selection:bg-theme-primary selection:text-white pb-20 relative">
       <Background />
       
       {/* Toast Notification */}
@@ -903,7 +925,7 @@ const App: React.FC = () => {
 
       <header className="pt-12 pb-8 px-6 text-center">
         <div className="flex items-center justify-center gap-3 mb-4">
-          <Terminal className="w-8 h-8 text-trae-purple animate-pulse" />
+          <Terminal className="w-8 h-8 text-theme-primary animate-pulse" />
           <h1 className="text-4xl md:text-5xl font-display font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-gray-200 to-gray-400">
             {eventName}
           </h1>
@@ -938,20 +960,22 @@ const App: React.FC = () => {
             isAiTyping={isAiTyping}
             taskLibrary={taskLibrary}
             setTaskLibrary={setTaskLibrary}
+            currentTheme={currentTheme}
+            setCurrentTheme={setCurrentTheme}
           />
         )}
 
         {(status === 'shuffling' || status === 'enriching') && (
           <div className="flex flex-col items-center justify-center h-64 space-y-6">
             <div className="relative w-24 h-24">
-              <div className="absolute inset-0 border-t-4 border-trae-purple rounded-full animate-spin"></div>
-              <div className="absolute inset-2 border-r-4 border-trae-blue rounded-full animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }}></div>
+              <div className="absolute inset-0 border-t-4 border-theme-primary rounded-full animate-spin"></div>
+              <div className="absolute inset-2 border-r-4 border-theme-secondary rounded-full animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }}></div>
             </div>
             <div className="text-center space-y-2">
               <h3 className="text-2xl font-display font-bold animate-pulse">
                 {status === 'shuffling' ? 'Aligning Neural Pathways...' : 'Generating Team Identities...'}
               </h3>
-              <p className="text-lg text-trae-purple/80 font-display font-medium">
+              <p className="text-lg text-theme-primary/80 font-display font-medium">
                 {status === 'shuffling' ? '正在匹配神经通路...' : '正在生成队伍标识...'}
               </p>
               <p className="text-gray-500 font-mono text-sm">
@@ -971,7 +995,7 @@ const App: React.FC = () => {
                 {teams.length} Teams Generated / 已生成 {teams.length} 个队伍
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => setIsResultQrOpen(true)} className="flex items-center gap-2 text-white hover:text-trae-purple transition-colors px-4 py-2 rounded-lg hover:bg-white/5 text-sm border border-white/5">
+                <button onClick={() => setIsResultQrOpen(true)} className="flex items-center gap-2 text-white hover:text-theme-primary transition-colors px-4 py-2 rounded-lg hover:bg-white/5 text-sm border border-white/5">
                   <QrCode className="w-4 h-4" /> <span className="hidden sm:inline">Join QR</span>
                 </button>
                 
@@ -981,10 +1005,10 @@ const App: React.FC = () => {
                         onClick={() => toggleAudioPlayback('global')}
                         className={`flex items-center gap-2 transition-colors px-4 py-2 rounded-lg text-sm border min-w-[130px] justify-center ${
                             isPlayingAudio 
-                            ? 'border-trae-purple/30 text-trae-purple bg-trae-purple/10 hover:bg-trae-purple/20' 
+                            ? 'border-theme-primary/30 text-theme-primary bg-theme-primary/10 hover:bg-theme-primary/20' 
                             : isPaused
                                 ? 'border-yellow-500/30 text-yellow-500 bg-yellow-500/10 hover:bg-yellow-500/20'
-                                : 'border-trae-accent/30 text-trae-accent hover:bg-trae-accent/10 hover:text-white'
+                                : 'border-theme-accent/30 text-theme-accent hover:bg-theme-accent/10 hover:text-white'
                         }`}
                     >
                         {isPlayingAudio ? (
@@ -1008,7 +1032,7 @@ const App: React.FC = () => {
                     )}
                 </div>
 
-                <button onClick={handleShare} className="flex items-center gap-2 text-trae-purple hover:text-white transition-colors px-4 py-2 rounded-lg hover:bg-trae-purple/10 text-sm border border-trae-purple/30">
+                <button onClick={handleShare} className="flex items-center gap-2 text-theme-primary hover:text-white transition-colors px-4 py-2 rounded-lg hover:bg-theme-primary/10 text-sm border border-theme-primary/30">
                   <Share2 className="w-4 h-4" /> <span className="hidden sm:inline">Share</span>
                 </button>
                 <button onClick={handleSaveToHistory} className="flex items-center gap-2 text-gray-300 hover:text-white transition-colors px-4 py-2 rounded-lg hover:bg-white/10 text-sm border border-white/5">
@@ -1017,7 +1041,7 @@ const App: React.FC = () => {
                  <button onClick={() => setIsHistoryOpen(true)} className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors px-4 py-2 rounded-lg hover:bg-white/10 text-sm border border-white/5">
                   <History className="w-4 h-4" /> <span className="hidden sm:inline">History</span>
                 </button>
-                <button onClick={handleMatch} className="flex items-center gap-2 text-trae-blue hover:text-white transition-colors px-4 py-2 rounded-lg hover:bg-trae-blue/10 text-sm">
+                <button onClick={handleMatch} className="flex items-center gap-2 text-theme-secondary hover:text-white transition-colors px-4 py-2 rounded-lg hover:bg-theme-secondary/10 text-sm">
                   <RefreshCw className="w-4 h-4" /> <span className="hidden sm:inline">Rematch</span>
                 </button>
               </div>
@@ -1025,7 +1049,7 @@ const App: React.FC = () => {
 
             {isResultQrOpen && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in p-4">
-                <div className="bg-trae-card border border-white/10 rounded-2xl p-6 max-w-sm w-full relative shadow-2xl">
+                <div className="bg-theme-card border border-white/10 rounded-2xl p-6 max-w-sm w-full relative shadow-2xl">
                     <button onClick={() => setIsResultQrOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
                     <h3 className="text-xl font-bold text-center mb-2 text-white">Join Chat</h3>
                     <div className="bg-white p-4 rounded-xl mx-auto w-48 h-48 mb-4 flex items-center justify-center">
